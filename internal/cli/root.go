@@ -65,6 +65,7 @@ func init() {
 	rootCmd.AddCommand(uninstallCmd)
 	rootCmd.AddCommand(maintainCmd)
 	rootCmd.AddCommand(spacelensCmd)
+	rootCmd.AddCommand(statsCmd)
 }
 
 // shouldSkipConfirm returns true if the user wants to skip confirmation,

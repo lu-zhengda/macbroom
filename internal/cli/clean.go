@@ -2,8 +2,10 @@ package cli
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/lu-zhengda/macbroom/internal/history"
 	"github.com/lu-zhengda/macbroom/internal/trash"
 	"github.com/lu-zhengda/macbroom/internal/utils"
 )
@@ -73,6 +75,12 @@ var cleanCmd = &cobra.Command{
 			}
 		}
 
+		type catResult struct {
+			items int
+			bytes int64
+		}
+		byCategory := make(map[string]*catResult)
+
 		var cleaned, failed int
 		for _, t := range targets {
 			var err error
@@ -86,6 +94,13 @@ var cleanCmd = &cobra.Command{
 				failed++
 			} else {
 				cleaned++
+				cr := byCategory[t.Category]
+				if cr == nil {
+					cr = &catResult{}
+					byCategory[t.Category] = cr
+				}
+				cr.items++
+				cr.bytes += t.Size
 			}
 		}
 
@@ -94,6 +109,24 @@ var cleanCmd = &cobra.Command{
 			fmt.Printf(", %d failed", failed)
 		}
 		fmt.Println()
+
+		// Record cleanup history per category.
+		method := "trash"
+		if cleanPermanent {
+			method = "permanent"
+		}
+		h := history.New(history.DefaultPath())
+		now := time.Now()
+		for cat, cr := range byCategory {
+			_ = h.Record(history.Entry{
+				Timestamp:  now,
+				Category:   cat,
+				Items:      cr.items,
+				BytesFreed: cr.bytes,
+				Method:     method,
+			})
+		}
+
 		return nil
 	},
 }

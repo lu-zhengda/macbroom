@@ -3,11 +3,13 @@ package tui
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/lu-zhengda/macbroom/internal/engine"
+	"github.com/lu-zhengda/macbroom/internal/history"
 	"github.com/lu-zhengda/macbroom/internal/maintain"
 	"github.com/lu-zhengda/macbroom/internal/scanner"
 	"github.com/lu-zhengda/macbroom/internal/trash"
@@ -184,6 +186,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastFailed = msg.failed
 		m.lastSize = msg.size
 		m.currentView = viewResult
+
+		// Record cleanup history.
+		if msg.cleaned > 0 && m.categoryIdx < len(m.results) {
+			h := history.New(history.DefaultPath())
+			_ = h.Record(history.Entry{
+				Timestamp:  time.Now(),
+				Category:   m.results[m.categoryIdx].Category,
+				Items:      msg.cleaned,
+				BytesFreed: msg.size,
+				Method:     "trash",
+			})
+		}
+
 		return m, nil
 
 	case spaceLensProgressMsg:
