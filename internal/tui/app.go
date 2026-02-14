@@ -42,6 +42,10 @@ type spaceLensDoneMsg struct {
 	path  string
 }
 
+type spaceLensProgressMsg struct {
+	name string
+}
+
 type maintainDoneMsg struct {
 	results []maintain.Result
 }
@@ -76,10 +80,13 @@ type Model struct {
 	lastSize    int64
 
 	// Space Lens state
-	slPath    string
-	slNodes   []scanner.SpaceLensNode
-	slCursor  int
-	slLoading bool
+	slPath       string
+	slNodes      []scanner.SpaceLensNode
+	slCursor     int
+	slLoading    bool
+	slScanning   string // current item being scanned
+	slCancel     context.CancelFunc
+	slProgressCh chan string
 
 	// Maintenance state
 	maintainResults []maintain.Result
@@ -114,12 +121,33 @@ func (m Model) doScan() tea.Cmd {
 	}
 }
 
-func (m Model) doSpaceLens() tea.Cmd {
-	path := m.slPath
-	return func() tea.Msg {
+func startSpaceLens(path string) (context.CancelFunc, chan string, tea.Cmd) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ch := make(chan string, 1)
+
+	analyzeCmd := func() tea.Msg {
 		sl := scanner.NewSpaceLens(path, 1)
-		nodes, _ := sl.Analyze(context.Background())
+		sl.SetProgress(func(name string) {
+			select {
+			case ch <- name:
+			default:
+			}
+		})
+		nodes, _ := sl.Analyze(ctx)
+		close(ch)
 		return spaceLensDoneMsg{nodes: nodes, path: path}
+	}
+
+	return cancel, ch, tea.Batch(analyzeCmd, listenSpaceLensProgress(ch))
+}
+
+func listenSpaceLensProgress(ch chan string) tea.Cmd {
+	return func() tea.Msg {
+		name, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return spaceLensProgressMsg{name: name}
 	}
 }
 
@@ -158,10 +186,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentView = viewResult
 		return m, nil
 
+	case spaceLensProgressMsg:
+		m.slScanning = msg.name
+		if m.slProgressCh != nil {
+			return m, listenSpaceLensProgress(m.slProgressCh)
+		}
+		return m, nil
+
 	case spaceLensDoneMsg:
 		m.slLoading = false
 		m.slNodes = msg.nodes
 		m.slPath = msg.path
+		m.slScanning = ""
+		m.slCancel = nil
+		m.slProgressCh = nil
 		return m, nil
 
 	case maintainDoneMsg:
@@ -219,7 +257,10 @@ func (m Model) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.slCursor = 0
 			m.slPath = "/"
 			m.currentView = viewSpaceLens
-			return m, tea.Batch(m.doSpaceLens(), m.spinner.Tick)
+			cancel, ch, cmd := startSpaceLens(m.slPath)
+			m.slCancel = cancel
+			m.slProgressCh = ch
+			return m, tea.Batch(cmd, m.spinner.Tick)
 		case 2: // Maintenance
 			m.currentView = viewMaintain
 			return m, tea.Batch(m.doMaintain(), m.spinner.Tick)
@@ -344,6 +385,17 @@ func (m Model) updateResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateSpaceLens(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.slLoading {
+		if msg.String() == "esc" || msg.String() == "backspace" {
+			if m.slCancel != nil {
+				m.slCancel()
+			}
+			m.slLoading = false
+			m.slScanning = ""
+			m.slCancel = nil
+			m.slProgressCh = nil
+			m.currentView = viewMenu
+			m.cursor = 1
+		}
 		return m, nil
 	}
 	switch msg.String() {
@@ -364,7 +416,10 @@ func (m Model) updateSpaceLens(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.slPath = m.slNodes[m.slCursor].Path
 			m.slLoading = true
 			m.slCursor = 0
-			return m, tea.Batch(m.doSpaceLens(), m.spinner.Tick)
+			cancel, ch, cmd := startSpaceLens(m.slPath)
+			m.slCancel = cancel
+			m.slProgressCh = ch
+			return m, tea.Batch(cmd, m.spinner.Tick)
 		}
 	case "h":
 		// Go up one directory
@@ -372,7 +427,10 @@ func (m Model) updateSpaceLens(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.slPath = m.slPath[:idx]
 			m.slLoading = true
 			m.slCursor = 0
-			return m, tea.Batch(m.doSpaceLens(), m.spinner.Tick)
+			cancel, ch, cmd := startSpaceLens(m.slPath)
+			m.slCancel = cancel
+			m.slProgressCh = ch
+			return m, tea.Batch(cmd, m.spinner.Tick)
 		}
 	case "esc", "backspace":
 		m.currentView = viewMenu
@@ -616,7 +674,16 @@ func (m Model) viewSpaceLens() string {
 	s += dimStyle.Render(m.slPath) + "\n\n"
 
 	if m.slLoading {
-		return s + m.spinner.View() + " Analyzing...\n"
+		s += m.spinner.View() + " Analyzing...\n"
+		if m.slScanning != "" {
+			name := m.slScanning
+			if len(name) > 40 {
+				name = name[:37] + "..."
+			}
+			s += dimStyle.Render("  "+name) + "\n"
+		}
+		s += helpStyle.Render("\nesc cancel")
+		return s
 	}
 
 	if len(m.slNodes) == 0 {
