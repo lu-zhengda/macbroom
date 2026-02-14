@@ -3,11 +3,13 @@ package tui
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/lu-zhengda/macbroom/internal/dupes"
 	"github.com/lu-zhengda/macbroom/internal/engine"
 	"github.com/lu-zhengda/macbroom/internal/history"
 	"github.com/lu-zhengda/macbroom/internal/maintain"
@@ -28,6 +30,9 @@ const (
 	viewSpaceLensConfirm
 	viewMaintain
 	viewMaintainResult
+	viewDupes
+	viewDupesResult
+	viewDupesConfirm
 )
 
 type scanDoneMsg struct {
@@ -53,6 +58,20 @@ type maintainDoneMsg struct {
 	results []maintain.Result
 }
 
+type dupesDoneMsg struct {
+	groups []dupes.Group
+}
+
+type dupesProgressMsg struct {
+	path string
+}
+
+type dupesCleanDoneMsg struct {
+	deleted int
+	failed  int
+	freed   int64
+}
+
 // menuItem represents a main menu option.
 type menuItem struct {
 	label       string
@@ -63,6 +82,7 @@ var menuItems = []menuItem{
 	{"Clean", "Scan and remove junk files"},
 	{"Space Lens", "Visualize disk space usage"},
 	{"Maintenance", "Run system maintenance tasks"},
+	{"Duplicates", "Find and remove duplicate files"},
 }
 
 type Model struct {
@@ -95,6 +115,19 @@ type Model struct {
 
 	// Maintenance state
 	maintainResults []maintain.Result
+
+	// Duplicates state
+	dupGroups       []dupes.Group
+	dupLoading      bool
+	dupScanning     string // current file being scanned
+	dupCancel       context.CancelFunc
+	dupProgressCh   chan string
+	dupCursor       int
+	dupScrollOffset int
+	dupSelected     map[string]bool // key: "groupIdx:fileIdx", tracks copies to delete
+	dupDeleted      int
+	dupFailed       int
+	dupFreed        int64
 
 	spinner spinner.Model
 
@@ -171,7 +204,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if m.scanning || m.slLoading || m.currentView == viewMaintain {
+		if m.scanning || m.slLoading || m.dupLoading || m.currentView == viewMaintain {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -226,6 +259,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentView = viewMaintainResult
 		return m, nil
 
+	case dupesProgressMsg:
+		m.dupScanning = msg.path
+		if m.dupProgressCh != nil {
+			return m, listenDupesProgress(m.dupProgressCh)
+		}
+		return m, nil
+
+	case dupesDoneMsg:
+		m.dupLoading = false
+		m.dupGroups = msg.groups
+		m.dupScanning = ""
+		m.dupCancel = nil
+		m.dupProgressCh = nil
+		m.dupCursor = 0
+		m.dupScrollOffset = 0
+		// Pre-select all copies (skip index 0 in each group = the "keep" file).
+		m.dupSelected = make(map[string]bool)
+		for gi, g := range m.dupGroups {
+			for fi := 1; fi < len(g.Files); fi++ {
+				m.dupSelected[fmt.Sprintf("%d:%d", gi, fi)] = true
+			}
+		}
+		return m, nil
+
+	case dupesCleanDoneMsg:
+		m.dupDeleted = msg.deleted
+		m.dupFailed = msg.failed
+		m.dupFreed = msg.freed
+		m.currentView = viewDupesResult
+		return m, nil
+
 	case tea.KeyMsg:
 		// Global quit
 		if msg.String() == "ctrl+c" || msg.String() == "q" {
@@ -251,6 +315,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// waiting for results, no input
 		case viewMaintainResult:
 			return m.updateMaintainResult(msg)
+		case viewDupes:
+			return m.updateDupes(msg)
+		case viewDupesConfirm:
+			return m.updateDupesConfirm(msg)
+		case viewDupesResult:
+			return m.updateDupesResult(msg)
 		}
 	}
 
@@ -286,6 +356,15 @@ func (m Model) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case 2: // Maintenance
 			m.currentView = viewMaintain
 			return m, tea.Batch(m.doMaintain(), m.spinner.Tick)
+		case 3: // Duplicates
+			m.dupLoading = true
+			m.dupCursor = 0
+			m.dupScrollOffset = 0
+			m.currentView = viewDupes
+			cancel, ch, cmd := startDupesScan()
+			m.dupCancel = cancel
+			m.dupProgressCh = ch
+			return m, tea.Batch(cmd, m.spinner.Tick)
 		}
 	}
 	return m, nil
@@ -510,6 +589,200 @@ func (m Model) updateMaintainResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func startDupesScan() (context.CancelFunc, chan string, tea.Cmd) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ch := make(chan string, 1)
+
+	home := utils.HomeDir()
+	dirs := []string{
+		filepath.Join(home, "Downloads"),
+		filepath.Join(home, "Desktop"),
+		filepath.Join(home, "Documents"),
+	}
+
+	scanCmd := func() tea.Msg {
+		groups, _ := dupes.FindWithProgress(ctx, dirs, 0, func(path string) {
+			select {
+			case ch <- path:
+			default:
+			}
+		})
+		close(ch)
+		return dupesDoneMsg{groups: groups}
+	}
+
+	return cancel, ch, tea.Batch(scanCmd, listenDupesProgress(ch))
+}
+
+func listenDupesProgress(ch chan string) tea.Cmd {
+	return func() tea.Msg {
+		path, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return dupesProgressMsg{path: path}
+	}
+}
+
+// dupesFileList returns a flat list of (groupIdx, fileIdx, path, size, isKeep) for display.
+type dupesEntry struct {
+	groupIdx int
+	fileIdx  int
+	path     string
+	size     int64
+	hash     string
+	isKeep   bool
+	isHeader bool
+}
+
+func (m Model) dupesFlatList() []dupesEntry {
+	var entries []dupesEntry
+	for gi, g := range m.dupGroups {
+		wasted := g.Size * int64(len(g.Files)-1)
+		entries = append(entries, dupesEntry{
+			groupIdx: gi,
+			isHeader: true,
+			size:     wasted,
+			hash:     g.Hash,
+		})
+		for fi, f := range g.Files {
+			entries = append(entries, dupesEntry{
+				groupIdx: gi,
+				fileIdx:  fi,
+				path:     f,
+				size:     g.Size,
+				isKeep:   fi == 0,
+			})
+		}
+	}
+	return entries
+}
+
+func (m Model) updateDupes(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.dupLoading {
+		if msg.String() == "esc" || msg.String() == "backspace" {
+			if m.dupCancel != nil {
+				m.dupCancel()
+			}
+			m.dupLoading = false
+			m.dupScanning = ""
+			m.dupCancel = nil
+			m.dupProgressCh = nil
+			m.currentView = viewMenu
+			m.cursor = 3
+		}
+		return m, nil
+	}
+
+	entries := m.dupesFlatList()
+
+	switch msg.String() {
+	case "up", "k":
+		if m.dupCursor > 0 {
+			m.dupCursor--
+			// Skip headers.
+			if m.dupCursor >= 0 && m.dupCursor < len(entries) && entries[m.dupCursor].isHeader {
+				if m.dupCursor > 0 {
+					m.dupCursor--
+				}
+			}
+			m.dupEnsureCursorVisible(entries)
+		}
+	case "down", "j":
+		if m.dupCursor < len(entries)-1 {
+			m.dupCursor++
+			// Skip headers.
+			if m.dupCursor < len(entries) && entries[m.dupCursor].isHeader {
+				if m.dupCursor < len(entries)-1 {
+					m.dupCursor++
+				}
+			}
+			m.dupEnsureCursorVisible(entries)
+		}
+	case " ":
+		if m.dupCursor < len(entries) {
+			e := entries[m.dupCursor]
+			if !e.isHeader && !e.isKeep {
+				key := fmt.Sprintf("%d:%d", e.groupIdx, e.fileIdx)
+				if m.dupSelected[key] {
+					delete(m.dupSelected, key)
+				} else {
+					m.dupSelected[key] = true
+				}
+			}
+		}
+	case "d", "enter":
+		if len(m.dupSelected) > 0 {
+			m.currentView = viewDupesConfirm
+		}
+	case "esc", "backspace":
+		m.currentView = viewMenu
+		m.cursor = 3
+	}
+	return m, nil
+}
+
+func (m *Model) dupEnsureCursorVisible(entries []dupesEntry) {
+	visible := m.visibleItemCount()
+	if m.dupCursor < m.dupScrollOffset {
+		m.dupScrollOffset = m.dupCursor
+	}
+	if m.dupCursor >= m.dupScrollOffset+visible {
+		m.dupScrollOffset = m.dupCursor - visible + 1
+	}
+}
+
+func (m Model) updateDupesConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y":
+		return m, m.doDupesClean()
+	case "n", "esc", "backspace":
+		m.currentView = viewDupes
+	}
+	return m, nil
+}
+
+func (m Model) updateDupesResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "r":
+		// Re-scan.
+		m.dupLoading = true
+		m.dupCursor = 0
+		m.dupScrollOffset = 0
+		m.currentView = viewDupes
+		cancel, ch, cmd := startDupesScan()
+		m.dupCancel = cancel
+		m.dupProgressCh = ch
+		return m, tea.Batch(cmd, m.spinner.Tick)
+	case "esc", "backspace", "enter":
+		m.currentView = viewMenu
+		m.cursor = 3
+	}
+	return m, nil
+}
+
+func (m Model) doDupesClean() tea.Cmd {
+	return func() tea.Msg {
+		var deleted, failed int
+		var freed int64
+		for gi, g := range m.dupGroups {
+			for fi, f := range g.Files {
+				key := fmt.Sprintf("%d:%d", gi, fi)
+				if !m.dupSelected[key] {
+					continue
+				}
+				if err := trash.MoveToTrash(f); err != nil {
+					failed++
+				} else {
+					deleted++
+					freed += g.Size
+				}
+			}
+		}
+		return dupesCleanDoneMsg{deleted: deleted, failed: failed, freed: freed}
+	}
+}
+
 func (m Model) doClean() tea.Cmd {
 	return func() tea.Msg {
 		if m.categoryIdx >= len(m.results) {
@@ -559,6 +832,12 @@ func (m Model) View() string {
 		return m.viewMaintain()
 	case viewMaintainResult:
 		return m.viewMaintainResult()
+	case viewDupes:
+		return m.viewDupes()
+	case viewDupesConfirm:
+		return m.viewDupesConfirm()
+	case viewDupesResult:
+		return m.viewDupesResult()
 	default:
 		return m.viewMenu()
 	}
@@ -828,6 +1107,151 @@ func (m Model) viewSpaceLensConfirm() string {
 	s += fmt.Sprintf("  Delete %s (%s)? (y/n)\n", m.slDeleteTarget.Name, utils.FormatSize(m.slDeleteTarget.Size))
 	s += dimStyle.Render(fmt.Sprintf("\n  Path: %s", m.slDeleteTarget.Path)) + "\n"
 	s += helpStyle.Render("\n  y confirm | n cancel | q quit")
+	return s
+}
+
+func (m Model) viewDupes() string {
+	s := titleStyle.Render("macbroom -- Duplicates") + "\n"
+
+	if m.dupLoading {
+		s += "\n" + m.spinner.View() + " Scanning for duplicates...\n"
+		if m.dupScanning != "" {
+			name := m.dupScanning
+			if len(name) > 50 {
+				name = "..." + name[len(name)-47:]
+			}
+			s += dimStyle.Render("  "+name) + "\n"
+		}
+		s += helpStyle.Render("\nesc cancel")
+		return s
+	}
+
+	if len(m.dupGroups) == 0 {
+		s += "\nNo duplicates found!\n"
+		return s + helpStyle.Render("\nesc back | q quit")
+	}
+
+	var totalWasted int64
+	var totalCopies int
+	for _, g := range m.dupGroups {
+		totalWasted += g.Size * int64(len(g.Files)-1)
+		totalCopies += len(g.Files) - 1
+	}
+	s += dimStyle.Render(fmt.Sprintf("%d groups, %d copies, %s wasted",
+		len(m.dupGroups), totalCopies, utils.FormatSize(totalWasted))) + "\n\n"
+
+	entries := m.dupesFlatList()
+	visible := m.visibleItemCount()
+	total := len(entries)
+	end := m.dupScrollOffset + visible
+	if end > total {
+		end = total
+	}
+
+	for i := m.dupScrollOffset; i < end; i++ {
+		e := entries[i]
+		if e.isHeader {
+			hashShort := e.hash
+			if len(hashShort) > 12 {
+				hashShort = hashShort[:12]
+			}
+			s += dimStyle.Render(fmt.Sprintf("  --- Group %d: %s wasted (hash: %s...) ---",
+				e.groupIdx+1, utils.FormatSize(e.size), hashShort)) + "\n"
+			continue
+		}
+
+		cursor := "  "
+		if i == m.dupCursor {
+			cursor = "> "
+		}
+
+		label := "[keep]"
+		check := ""
+		if !e.isKeep {
+			key := fmt.Sprintf("%d:%d", e.groupIdx, e.fileIdx)
+			if m.dupSelected[key] {
+				check = "[x] "
+			} else {
+				check = "[ ] "
+			}
+			label = ""
+		} else {
+			label = "[keep] "
+		}
+
+		path := e.path
+		if len(path) > 45 {
+			path = "..." + path[len(path)-42:]
+		}
+
+		line := fmt.Sprintf("%s%s%s%s (%s)", cursor, label, check, path, utils.FormatSize(e.size))
+
+		if i == m.dupCursor {
+			s += selectedStyle.Render(line) + "\n"
+		} else {
+			s += line + "\n"
+		}
+	}
+
+	if total > visible {
+		s += dimStyle.Render(fmt.Sprintf("  [%d-%d of %d]", m.dupScrollOffset+1, end, total)) + "\n"
+	}
+
+	var selectedSize int64
+	var selectedCount int
+	for key := range m.dupSelected {
+		selectedCount++
+		var gi, fi int
+		fmt.Sscanf(key, "%d:%d", &gi, &fi)
+		if gi < len(m.dupGroups) {
+			selectedSize += m.dupGroups[gi].Size
+		}
+	}
+
+	s += "\n" + statusBarStyle.Render(fmt.Sprintf(" Selected: %d copies (%s) ", selectedCount, utils.FormatSize(selectedSize)))
+	s += helpStyle.Render("\n\nj/k navigate | space toggle | d delete selected | esc back | q quit")
+	return s
+}
+
+func (m Model) viewDupesConfirm() string {
+	dangerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("196")).
+		Background(lipgloss.Color("52")).
+		Padding(0, 1)
+
+	s := dangerStyle.Render(" CONFIRM DUPLICATE DELETION ") + "\n\n"
+
+	var selectedSize int64
+	var selectedCount int
+	for key := range m.dupSelected {
+		selectedCount++
+		var gi, fi int
+		fmt.Sscanf(key, "%d:%d", &gi, &fi)
+		if gi < len(m.dupGroups) {
+			selectedSize += m.dupGroups[gi].Size
+		}
+	}
+
+	s += fmt.Sprintf("  %d duplicate copies | %s | will be moved to Trash (recoverable)\n",
+		selectedCount, utils.FormatSize(selectedSize))
+	s += dimStyle.Render("\n  One copy per group will be kept.") + "\n"
+	s += helpStyle.Render("\n  y confirm | n cancel | q quit")
+	return s
+}
+
+func (m Model) viewDupesResult() string {
+	s := titleStyle.Render("macbroom -- Duplicates Cleaned") + "\n\n"
+
+	successStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("82"))
+	failStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
+
+	s += successStyle.Render(fmt.Sprintf("  Deleted: %d copies (%s freed)", m.dupDeleted, utils.FormatSize(m.dupFreed))) + "\n"
+	if m.dupFailed > 0 {
+		s += failStyle.Render(fmt.Sprintf("  Failed:  %d items", m.dupFailed)) + "\n"
+	}
+
+	s += helpStyle.Render("\n  r re-scan | esc menu | q quit")
 	return s
 }
 

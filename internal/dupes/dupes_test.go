@@ -1,0 +1,167 @@
+package dupes_test
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/lu-zhengda/macbroom/internal/dupes"
+)
+
+func TestFindDuplicates(t *testing.T) {
+	dir := t.TempDir()
+
+	content := []byte("duplicate content here, long enough to pass minSize")
+
+	// Two identical files.
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.txt"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// One unique file.
+	if err := os.WriteFile(filepath.Join(dir, "unique.txt"), []byte("totally different content!!!"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	groups, err := dupes.Find(context.Background(), []string{dir}, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(groups) != 1 {
+		t.Fatalf("expected 1 group, got %d", len(groups))
+	}
+
+	g := groups[0]
+	if len(g.Files) != 2 {
+		t.Fatalf("expected 2 files in group, got %d", len(g.Files))
+	}
+	if g.Size != int64(len(content)) {
+		t.Errorf("expected size %d, got %d", len(content), g.Size)
+	}
+	if g.Hash == "" {
+		t.Error("expected non-empty hash")
+	}
+}
+
+func TestNoDuplicates(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("file one"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.txt"), []byte("file two!"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "c.txt"), []byte("file three!!"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	groups, err := dupes.Find(context.Background(), []string{dir}, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(groups) != 0 {
+		t.Fatalf("expected 0 groups, got %d", len(groups))
+	}
+}
+
+func TestSkipsSmallFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	content := []byte("tiny")
+
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.txt"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// minSize larger than the file content.
+	groups, err := dupes.Find(context.Background(), []string{dir}, 1024)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(groups) != 0 {
+		t.Fatalf("expected 0 groups (files below minSize), got %d", len(groups))
+	}
+}
+
+func TestContextCancelled(t *testing.T) {
+	dir := t.TempDir()
+
+	content := []byte("some content for dupe test")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.txt"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	_, err := dupes.Find(ctx, []string{dir}, 0)
+	if err == nil {
+		t.Fatal("expected error for cancelled context, got nil")
+	}
+}
+
+func TestFindWithProgress(t *testing.T) {
+	dir := t.TempDir()
+
+	content := []byte("progress tracking content here!")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.txt"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var paths []string
+	groups, err := dupes.FindWithProgress(context.Background(), []string{dir}, 0, func(path string) {
+		paths = append(paths, path)
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(groups) != 1 {
+		t.Fatalf("expected 1 group, got %d", len(groups))
+	}
+	if len(paths) == 0 {
+		t.Error("expected progress callback to be called at least once")
+	}
+}
+
+func TestMultipleDirs(t *testing.T) {
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+
+	content := []byte("cross-directory duplicate content")
+	if err := os.WriteFile(filepath.Join(dir1, "a.txt"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir2, "b.txt"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	groups, err := dupes.Find(context.Background(), []string{dir1, dir2}, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(groups) != 1 {
+		t.Fatalf("expected 1 group across dirs, got %d", len(groups))
+	}
+	if len(groups[0].Files) != 2 {
+		t.Fatalf("expected 2 files in group, got %d", len(groups[0].Files))
+	}
+}
