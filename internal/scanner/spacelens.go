@@ -18,13 +18,22 @@ type SpaceLensNode struct {
 	Depth    int
 }
 
+// ProgressFunc is called with the name of each directory being analyzed.
+type ProgressFunc func(name string)
+
 type SpaceLens struct {
 	root     string
 	maxDepth int
+	onProgress ProgressFunc
 }
 
 func NewSpaceLens(root string, maxDepth int) *SpaceLens {
 	return &SpaceLens{root: root, maxDepth: maxDepth}
+}
+
+// SetProgress sets a callback for reporting scan progress.
+func (s *SpaceLens) SetProgress(fn ProgressFunc) {
+	s.onProgress = fn
 }
 
 func (s *SpaceLens) Analyze(ctx context.Context) ([]SpaceLensNode, error) {
@@ -46,6 +55,9 @@ func (s *SpaceLens) analyzeDir(ctx context.Context, dir string, depth int) ([]Sp
 	var nodes []SpaceLensNode
 	for _, entry := range entries {
 		entryPath := filepath.Join(dir, entry.Name())
+		if s.onProgress != nil {
+			s.onProgress(entry.Name())
+		}
 		info, err := entry.Info()
 		if err != nil {
 			continue
