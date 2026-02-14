@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zhengda-lu/tidymac/internal/scanner"
-	"github.com/zhengda-lu/tidymac/internal/utils"
+	"github.com/lu-zhengda/tidymac/internal/scanner"
+	"github.com/lu-zhengda/tidymac/internal/utils"
 )
 
 func printScanResults(targets []scanner.Target) {

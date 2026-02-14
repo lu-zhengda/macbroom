@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/zhengda-lu/tidymac/internal/cli"
+	"github.com/lu-zhengda/tidymac/internal/cli"
 )
 
 func main() {

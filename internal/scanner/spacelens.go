@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/zhengda-lu/tidymac/internal/utils"
+	"github.com/lu-zhengda/tidymac/internal/utils"
 )
 
 type SpaceLensNode struct {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/zhengda-lu/tidymac/internal/maintain"
+	"github.com/lu-zhengda/tidymac/internal/maintain"
 )
 
 var maintainYes bool

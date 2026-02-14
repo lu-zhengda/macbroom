@@ -1,4 +1,4 @@
-module github.com/zhengda-lu/tidymac
+module github.com/lu-zhengda/tidymac
 
 go 1.25.0
 

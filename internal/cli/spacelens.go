@@ -7,9 +7,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
-	"github.com/zhengda-lu/tidymac/internal/scanner"
-	"github.com/zhengda-lu/tidymac/internal/tui"
-	"github.com/zhengda-lu/tidymac/internal/utils"
+	"github.com/lu-zhengda/tidymac/internal/scanner"
+	"github.com/lu-zhengda/tidymac/internal/tui"
+	"github.com/lu-zhengda/tidymac/internal/utils"
 )
 
 var (

@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/zhengda-lu/tidymac/internal/trash"
-	"github.com/zhengda-lu/tidymac/internal/utils"
+	"github.com/lu-zhengda/tidymac/internal/trash"
+	"github.com/lu-zhengda/tidymac/internal/utils"
 )
 
 var (

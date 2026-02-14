@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/zhengda-lu/tidymac/internal/scanner"
+	"github.com/lu-zhengda/tidymac/internal/scanner"
 )
 
 type ScanResult struct {
