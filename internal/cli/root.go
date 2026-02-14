@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
+	"github.com/lu-zhengda/macbroom/internal/config"
 	"github.com/lu-zhengda/macbroom/internal/engine"
 	"github.com/lu-zhengda/macbroom/internal/scanner"
 	"github.com/lu-zhengda/macbroom/internal/tui"
@@ -16,7 +17,9 @@ import (
 )
 
 var (
-	yoloMode bool
+	yoloMode   bool
+	configPath string
+	appConfig  *config.Config
 
 	// Set via ldflags at build time.
 	version = "dev"
@@ -27,6 +30,19 @@ var rootCmd = &cobra.Command{
 	Short:   "A lightweight macOS cleanup tool",
 	Long:    "macbroom scans and cleans system junk, browser caches, Xcode artifacts, and more.\nLaunch without subcommands for interactive TUI mode.",
 	Version: version,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if cmd.Name() == "help" || cmd.Flags().Changed("version") {
+			appConfig = config.Default()
+			return nil
+		}
+
+		cfg, err := config.Load(configPath)
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+		appConfig = cfg
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		e := buildEngine()
 		p := tea.NewProgram(tui.New(e), tea.WithAltScreen())
@@ -43,6 +59,7 @@ func init() {
 	rootCmd.SetVersionTemplate(fmt.Sprintf("macbroom %s\n", version))
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
 	rootCmd.PersistentFlags().BoolVar(&yoloMode, "yolo", false, "Skip ALL confirmation prompts (dangerous!)")
+	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "Path to config file (default ~/.config/macbroom/config.yaml)")
 	rootCmd.AddCommand(scanCmd)
 	rootCmd.AddCommand(cleanCmd)
 	rootCmd.AddCommand(uninstallCmd)
@@ -67,20 +84,26 @@ func printYoloWarning() {
 }
 
 func buildEngine() *engine.Engine {
-	e := engine.New()
-	e.Register(scanner.NewSystemScanner(""))
-	e.Register(scanner.NewBrowserScanner("", ""))
-	e.Register(scanner.NewXcodeScanner(""))
+	if appConfig == nil {
+		appConfig = config.Default()
+	}
 
-	home := utils.HomeDir()
-	e.Register(scanner.NewLargeFileScanner(
-		[]string{
-			filepath.Join(home, "Downloads"),
-			filepath.Join(home, "Desktop"),
-		},
-		100*1024*1024,
-		90*24*time.Hour,
-	))
+	e := engine.New()
+
+	if appConfig.Scanners.System {
+		e.Register(scanner.NewSystemScanner(""))
+	}
+	if appConfig.Scanners.Browser {
+		e.Register(scanner.NewBrowserScanner("", ""))
+	}
+	if appConfig.Scanners.Xcode {
+		e.Register(scanner.NewXcodeScanner(""))
+	}
+	if appConfig.Scanners.LargeFiles {
+		paths := expandPaths(appConfig.LargeFiles.Paths)
+		minAge := config.ParseDuration(appConfig.LargeFiles.MinAge)
+		e.Register(scanner.NewLargeFileScanner(paths, appConfig.LargeFiles.MinSize, minAge))
+	}
 
 	return e
 }
@@ -121,4 +144,19 @@ func scanWithCategories(e *engine.Engine, cats []string) ([]scanner.Target, erro
 		all = append(all, targets...)
 	}
 	return all, nil
+}
+
+// expandPaths expands ~ to the user's home directory in each path.
+func expandPaths(paths []string) []string {
+	home := utils.HomeDir()
+	result := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if strings.HasPrefix(p, "~/") {
+			p = filepath.Join(home, p[2:])
+		} else if p == "~" {
+			p = home
+		}
+		result = append(result, p)
+	}
+	return result
 }
