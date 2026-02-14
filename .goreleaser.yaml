@@ -1,0 +1,43 @@
+version: 2
+
+builds:
+  - main: ./cmd/tidymac
+    binary: tidymac
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/zhengda-lu/tidymac/internal/cli.version={{.Version}}
+      - -X github.com/zhengda-lu/tidymac/internal/cli.commit={{.ShortCommit}}
+      - -X github.com/zhengda-lu/tidymac/internal/cli.date={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+brews:
+  - repository:
+      owner: zhengda-lu
+      name: homebrew-tap
+    directory: Formula
+    homepage: "https://github.com/zhengda-lu/tidymac"
+    description: "A lightweight macOS cleanup tool"
+    license: "MIT"
+    install: |
+      bin.install "tidymac"
+    test: |
+      system "#{bin}/tidymac", "--version"
