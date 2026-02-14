@@ -5,9 +5,11 @@ import (
 	"path/filepath"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 	"github.com/zhengda-lu/tidymac/internal/engine"
 	"github.com/zhengda-lu/tidymac/internal/scanner"
+	"github.com/zhengda-lu/tidymac/internal/tui"
 	"github.com/zhengda-lu/tidymac/internal/utils"
 )
 
@@ -15,6 +17,12 @@ var rootCmd = &cobra.Command{
 	Use:   "tidymac",
 	Short: "A lightweight macOS cleanup tool",
 	Long:  "tidymac scans and cleans system junk, browser caches, Xcode artifacts, and more.\nLaunch without subcommands for interactive TUI mode.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		e := buildEngine()
+		p := tea.NewProgram(tui.New(e), tea.WithAltScreen())
+		_, err := p.Run()
+		return err
+	},
 }
 
 func Execute() error {
