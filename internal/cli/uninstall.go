@@ -10,7 +10,10 @@ import (
 	"github.com/zhengda-lu/macbroom/internal/utils"
 )
 
-var uninstallPermanent bool
+var (
+	uninstallPermanent bool
+	uninstallYes       bool
+)
 
 var uninstallCmd = &cobra.Command{
 	Use:   "uninstall [app-name]",
@@ -38,9 +41,20 @@ var uninstallCmd = &cobra.Command{
 			totalSize += t.Size
 		}
 
-		if !confirmAction(fmt.Sprintf("\nRemove all %d items (%s)?", len(targets), utils.FormatSize(totalSize))) {
-			fmt.Println("Cancelled.")
-			return nil
+		printYoloWarning()
+
+		if !shouldSkipConfirm(uninstallYes) {
+			if uninstallPermanent {
+				if !confirmDangerous(fmt.Sprintf("Permanently delete %d items (%s) for %q?", len(targets), utils.FormatSize(totalSize), appName)) {
+					fmt.Println("Cancelled.")
+					return nil
+				}
+			} else {
+				if !confirmAction(fmt.Sprintf("\nMove %d items (%s) for %q to Trash?", len(targets), utils.FormatSize(totalSize), appName)) {
+					fmt.Println("Cancelled.")
+					return nil
+				}
+			}
 		}
 
 		for _, t := range targets {
@@ -62,4 +76,5 @@ var uninstallCmd = &cobra.Command{
 
 func init() {
 	uninstallCmd.Flags().BoolVar(&uninstallPermanent, "permanent", false, "Permanently delete instead of moving to Trash")
+	uninstallCmd.Flags().BoolVarP(&uninstallYes, "yes", "y", false, "Skip confirmation prompt")
 }

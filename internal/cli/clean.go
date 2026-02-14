@@ -42,14 +42,19 @@ var cleanCmd = &cobra.Command{
 			totalSize += t.Size
 		}
 
-		if !cleanYes {
-			action := "Move to Trash"
+		printYoloWarning()
+
+		if !shouldSkipConfirm(cleanYes) {
 			if cleanPermanent {
-				action = "PERMANENTLY DELETE"
-			}
-			if !confirmAction(fmt.Sprintf("\n%s %s of files?", action, utils.FormatSize(totalSize))) {
-				fmt.Println("Cancelled.")
-				return nil
+				if !confirmDangerous(fmt.Sprintf("Permanently delete %d items (%s)?", len(targets), utils.FormatSize(totalSize))) {
+					fmt.Println("Cancelled.")
+					return nil
+				}
+			} else {
+				if !confirmAction(fmt.Sprintf("\nMove %d items (%s) to Trash?", len(targets), utils.FormatSize(totalSize))) {
+					fmt.Println("Cancelled.")
+					return nil
+				}
 			}
 		}
 

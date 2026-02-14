@@ -55,3 +55,14 @@ func confirmAction(prompt string) bool {
 	fmt.Scanln(&response)
 	return strings.ToLower(strings.TrimSpace(response)) == "y"
 }
+
+// confirmDangerous requires typing "yes" (not just "y") for permanent deletions.
+func confirmDangerous(prompt string) bool {
+	fmt.Printf("\n  *** DANGER ***\n")
+	fmt.Printf("  %s\n", prompt)
+	fmt.Printf("  This action is IRREVERSIBLE. Files will be permanently deleted.\n")
+	fmt.Printf("\n  Type 'yes' to confirm: ")
+	var response string
+	fmt.Scanln(&response)
+	return strings.ToLower(strings.TrimSpace(response)) == "yes"
+}

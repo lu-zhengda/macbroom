@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -12,6 +14,8 @@ import (
 	"github.com/zhengda-lu/macbroom/internal/tui"
 	"github.com/zhengda-lu/macbroom/internal/utils"
 )
+
+var yoloMode bool
 
 var rootCmd = &cobra.Command{
 	Use:   "macbroom",
@@ -30,11 +34,28 @@ func Execute() error {
 }
 
 func init() {
+	rootCmd.PersistentFlags().BoolVar(&yoloMode, "yolo", false, "Skip ALL confirmation prompts (dangerous!)")
 	rootCmd.AddCommand(scanCmd)
 	rootCmd.AddCommand(cleanCmd)
 	rootCmd.AddCommand(uninstallCmd)
 	rootCmd.AddCommand(maintainCmd)
 	rootCmd.AddCommand(spacelensCmd)
+}
+
+// shouldSkipConfirm returns true if the user wants to skip confirmation,
+// either via command-specific --yes or global --yolo.
+func shouldSkipConfirm(cmdYes bool) bool {
+	return cmdYes || yoloMode
+}
+
+// printYoloWarning prints a warning banner when --yolo mode is active.
+func printYoloWarning() {
+	if yoloMode {
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "  WARNING: --yolo mode is active. All confirmations will be skipped!")
+		fmt.Fprintln(os.Stderr, "  Files will be deleted without asking. Press Ctrl+C NOW to abort.")
+		fmt.Fprintln(os.Stderr, "")
+	}
 }
 
 func buildEngine() *engine.Engine {
