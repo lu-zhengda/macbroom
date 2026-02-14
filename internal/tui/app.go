@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zhengda-lu/tidymac/internal/engine"
+	"github.com/zhengda-lu/tidymac/internal/scanner"
 	"github.com/zhengda-lu/tidymac/internal/trash"
 	"github.com/zhengda-lu/tidymac/internal/utils"
 )
@@ -18,6 +19,7 @@ const (
 	viewDashboard viewState = iota
 	viewCategory
 	viewConfirm
+	viewResult
 )
 
 type scanDoneMsg struct {
@@ -40,6 +42,11 @@ type Model struct {
 
 	categoryIdx    int
 	categoryCursor int
+
+	// Result view state
+	lastCleaned int
+	lastFailed  int
+	lastSize    int64
 
 	spinner spinner.Model
 
@@ -92,8 +99,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case cleanDoneMsg:
-		m.scanning = true
-		return m, tea.Batch(m.doScan(), m.spinner.Tick)
+		m.lastCleaned = msg.cleaned
+		m.lastFailed = msg.failed
+		m.lastSize = msg.size
+		m.currentView = viewResult
+		return m, nil
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -167,6 +177,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.currentView != viewDashboard {
 				m.currentView = viewDashboard
 			}
+
+		case "r":
+			if m.currentView == viewResult {
+				m.scanning = true
+				m.currentView = viewDashboard
+				m.cursor = 0
+				return m, tea.Batch(m.doScan(), m.spinner.Tick)
+			}
+		}
+
+		// In result view, any key except q goes back to re-scan
+		if m.currentView == viewResult && msg.String() != "q" && msg.String() != "ctrl+c" && msg.String() != "r" {
+			// allow q to quit handled above
 		}
 	}
 
@@ -206,6 +229,8 @@ func (m Model) View() string {
 		return m.viewCategory()
 	case viewConfirm:
 		return m.viewConfirm()
+	case viewResult:
+		return m.viewResult()
 	default:
 		return m.viewDashboard()
 	}
@@ -298,20 +323,57 @@ func (m Model) viewConfirm() string {
 	}
 
 	r := m.results[m.categoryIdx]
-	s := titleStyle.Render("tidymac -- Confirm Deletion") + "\n\n"
+
+	dangerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("196")).
+		Background(lipgloss.Color("52")).
+		Padding(0, 1)
+
+	s := dangerStyle.Render(" CONFIRM DELETION ") + "\n\n"
 
 	var selectedSize int64
 	var selectedCount int
+	var hasRisky bool
 	for i, t := range r.Targets {
 		if m.selected[i] {
 			selectedSize += t.Size
 			selectedCount++
-			s += fmt.Sprintf("  %s (%s)\n", truncPath(t.Path, 50), utils.FormatSize(t.Size))
+			if t.Risk >= scanner.Risky {
+				hasRisky = true
+			}
+
+			riskLabel := ""
+			if t.Risk >= scanner.Moderate {
+				riskLabel = fmt.Sprintf(" [%s]", t.Risk)
+			}
+			s += fmt.Sprintf("  %s (%s)%s\n", truncPath(t.Path, 45), utils.FormatSize(t.Size), riskLabel)
 		}
 	}
 
-	s += fmt.Sprintf("\n%d items, %s will be moved to Trash.\n", selectedCount, utils.FormatSize(selectedSize))
-	s += helpStyle.Render("\ny confirm | n cancel")
+	s += "\n"
+	if hasRisky {
+		warnStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214"))
+		s += warnStyle.Render("  WARNING: Selection includes risky items that may contain user data!") + "\n\n"
+	}
+
+	s += fmt.Sprintf("  %d items | %s | will be moved to Trash (recoverable)\n", selectedCount, utils.FormatSize(selectedSize))
+	s += helpStyle.Render("\n  y confirm deletion | n cancel and go back")
+	return s
+}
+
+func (m Model) viewResult() string {
+	s := titleStyle.Render("tidymac -- Cleanup Complete") + "\n\n"
+
+	successStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("82"))
+	failStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
+
+	s += successStyle.Render(fmt.Sprintf("  Cleaned: %d items (%s freed)", m.lastCleaned, utils.FormatSize(m.lastSize))) + "\n"
+	if m.lastFailed > 0 {
+		s += failStyle.Render(fmt.Sprintf("  Failed:  %d items", m.lastFailed)) + "\n"
+	}
+
+	s += helpStyle.Render("\n  r re-scan | q quit")
 	return s
 }
 

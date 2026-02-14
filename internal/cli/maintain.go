@@ -7,6 +7,8 @@ import (
 	"github.com/zhengda-lu/tidymac/internal/maintain"
 )
 
+var maintainYes bool
+
 var maintainCmd = &cobra.Command{
 	Use:   "maintain",
 	Short: "Run system maintenance tasks",
@@ -21,9 +23,13 @@ var maintainCmd = &cobra.Command{
 			fmt.Printf("  %d. %s%s\n     %s\n\n", i+1, task.Name, sudo, task.Description)
 		}
 
-		if !confirmAction("Run all maintenance tasks?") {
-			fmt.Println("Cancelled.")
-			return nil
+		printYoloWarning()
+
+		if !shouldSkipConfirm(maintainYes) {
+			if !confirmAction("Run all maintenance tasks?") {
+				fmt.Println("Cancelled.")
+				return nil
+			}
 		}
 
 		fmt.Println()
@@ -38,4 +44,8 @@ var maintainCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+func init() {
+	maintainCmd.Flags().BoolVarP(&maintainYes, "yes", "y", false, "Skip confirmation prompt")
 }
