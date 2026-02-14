@@ -9,12 +9,16 @@ import (
 )
 
 var (
-	cleanPermanent bool
-	cleanYes       bool
-	cleanSystem    bool
-	cleanBrowser   bool
-	cleanXcode     bool
-	cleanLarge     bool
+	cleanPermanent  bool
+	cleanYes        bool
+	cleanSystem     bool
+	cleanBrowser    bool
+	cleanXcode      bool
+	cleanLarge      bool
+	cleanDocker     bool
+	cleanNode       bool
+	cleanHomebrew   bool
+	cleanSimulator  bool
 )
 
 var cleanCmd = &cobra.Command{
@@ -22,7 +26,7 @@ var cleanCmd = &cobra.Command{
 	Short: "Clean selected junk files",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		e := buildEngine()
-		cats := selectedCategories(cleanSystem, cleanBrowser, cleanXcode, cleanLarge)
+		cats := selectedCategories(cleanSystem, cleanBrowser, cleanXcode, cleanLarge, cleanDocker, cleanNode, cleanHomebrew, cleanSimulator)
 
 		fmt.Println("Scanning...")
 		targets, err := scanWithCategories(e, cats)
@@ -90,4 +94,8 @@ func init() {
 	cleanCmd.Flags().BoolVar(&cleanBrowser, "browser", false, "Clean browser caches only")
 	cleanCmd.Flags().BoolVar(&cleanXcode, "xcode", false, "Clean Xcode junk only")
 	cleanCmd.Flags().BoolVar(&cleanLarge, "large", false, "Clean large/old files only")
+	cleanCmd.Flags().BoolVar(&cleanDocker, "docker", false, "Clean Docker junk only")
+	cleanCmd.Flags().BoolVar(&cleanNode, "node", false, "Clean Node.js cache only")
+	cleanCmd.Flags().BoolVar(&cleanHomebrew, "homebrew", false, "Clean Homebrew cache only")
+	cleanCmd.Flags().BoolVar(&cleanSimulator, "simulator", false, "Clean iOS Simulator data only")
 }

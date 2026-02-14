@@ -104,12 +104,27 @@ func buildEngine() *engine.Engine {
 		minAge := config.ParseDuration(appConfig.LargeFiles.MinAge)
 		e.Register(scanner.NewLargeFileScanner(paths, appConfig.LargeFiles.MinSize, minAge))
 	}
+	if appConfig.Scanners.Docker {
+		e.Register(scanner.NewDockerScanner())
+	}
+	if appConfig.Scanners.Node {
+		home := utils.HomeDir()
+		paths := expandPaths(appConfig.LargeFiles.Paths)
+		minAge := config.ParseDuration(appConfig.LargeFiles.MinAge)
+		e.Register(scanner.NewNodeScanner(home, paths, minAge))
+	}
+	if appConfig.Scanners.Homebrew {
+		e.Register(scanner.NewHomebrewScanner())
+	}
+	if appConfig.Scanners.IOSSimulators {
+		e.Register(scanner.NewSimulatorScanner(""))
+	}
 
 	return e
 }
 
-func selectedCategories(system, browser, xcode, large bool) []string {
-	if !system && !browser && !xcode && !large {
+func selectedCategories(system, browser, xcode, large, docker, node, homebrew, simulator bool) []string {
+	if !system && !browser && !xcode && !large && !docker && !node && !homebrew && !simulator {
 		return nil
 	}
 	var cats []string
@@ -124,6 +139,18 @@ func selectedCategories(system, browser, xcode, large bool) []string {
 	}
 	if large {
 		cats = append(cats, "Large & Old Files")
+	}
+	if docker {
+		cats = append(cats, "Docker")
+	}
+	if node {
+		cats = append(cats, "Node.js")
+	}
+	if homebrew {
+		cats = append(cats, "Homebrew")
+	}
+	if simulator {
+		cats = append(cats, "iOS Simulators")
 	}
 	return cats
 }
