@@ -44,6 +44,18 @@ var rootCmd = &cobra.Command{
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if shell, _ := cmd.Flags().GetString("generate-completion"); shell != "" {
+			switch shell {
+			case "bash":
+				return cmd.Root().GenBashCompletion(os.Stdout)
+			case "zsh":
+				return cmd.Root().GenZshCompletion(os.Stdout)
+			case "fish":
+				return cmd.Root().GenFishCompletion(os.Stdout, true)
+			default:
+				return fmt.Errorf("unsupported shell: %s (use bash, zsh, or fish)", shell)
+			}
+		}
 		e := buildEngine()
 		p := tea.NewProgram(tui.New(e), tea.WithAltScreen())
 		_, err := p.Run()
@@ -60,6 +72,8 @@ func init() {
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
 	rootCmd.PersistentFlags().BoolVar(&yoloMode, "yolo", false, "Skip ALL confirmation prompts (dangerous!)")
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "Path to config file (default ~/.config/macbroom/config.yaml)")
+	rootCmd.Flags().String("generate-completion", "", "Generate shell completion (bash, zsh, fish)")
+	rootCmd.Flags().MarkHidden("generate-completion")
 	rootCmd.AddCommand(scanCmd)
 	rootCmd.AddCommand(cleanCmd)
 	rootCmd.AddCommand(uninstallCmd)
