@@ -1,6 +1,5 @@
 bin/
 dist/
-docs/plans/
 *.exe
 *.test
 *.out
