@@ -9,10 +9,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
-	"github.com/zhengda-lu/macbroom/internal/engine"
-	"github.com/zhengda-lu/macbroom/internal/scanner"
-	"github.com/zhengda-lu/macbroom/internal/tui"
-	"github.com/zhengda-lu/macbroom/internal/utils"
+	"github.com/lu-zhengda/macbroom/internal/engine"
+	"github.com/lu-zhengda/macbroom/internal/scanner"
+	"github.com/lu-zhengda/macbroom/internal/tui"
+	"github.com/lu-zhengda/macbroom/internal/utils"
 )
 
 var (

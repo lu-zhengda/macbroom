@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/zhengda-lu/macbroom/internal/cli"
+	"github.com/lu-zhengda/macbroom/internal/cli"
 )
 
 func main() {

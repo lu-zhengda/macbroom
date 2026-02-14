@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/zhengda-lu/macbroom/internal/scanner"
-	"github.com/zhengda-lu/macbroom/internal/trash"
-	"github.com/zhengda-lu/macbroom/internal/utils"
+	"github.com/lu-zhengda/macbroom/internal/scanner"
+	"github.com/lu-zhengda/macbroom/internal/trash"
+	"github.com/lu-zhengda/macbroom/internal/utils"
 )
 
 var (

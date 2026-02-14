@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/zhengda-lu/macbroom/internal/scanner"
-	"github.com/zhengda-lu/macbroom/internal/utils"
+	"github.com/lu-zhengda/macbroom/internal/scanner"
+	"github.com/lu-zhengda/macbroom/internal/utils"
 )
 
 type spaceLensDoneMsg struct {

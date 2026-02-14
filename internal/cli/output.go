@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zhengda-lu/macbroom/internal/scanner"
-	"github.com/zhengda-lu/macbroom/internal/utils"
+	"github.com/lu-zhengda/macbroom/internal/scanner"
+	"github.com/lu-zhengda/macbroom/internal/utils"
 )
 
 func printScanResults(targets []scanner.Target) {

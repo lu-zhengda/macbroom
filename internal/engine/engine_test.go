@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/zhengda-lu/macbroom/internal/scanner"
+	"github.com/lu-zhengda/macbroom/internal/scanner"
 )
 
 type mockScanner struct {

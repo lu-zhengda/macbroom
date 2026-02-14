@@ -7,10 +7,10 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/zhengda-lu/macbroom/internal/engine"
-	"github.com/zhengda-lu/macbroom/internal/scanner"
-	"github.com/zhengda-lu/macbroom/internal/trash"
-	"github.com/zhengda-lu/macbroom/internal/utils"
+	"github.com/lu-zhengda/macbroom/internal/engine"
+	"github.com/lu-zhengda/macbroom/internal/scanner"
+	"github.com/lu-zhengda/macbroom/internal/trash"
+	"github.com/lu-zhengda/macbroom/internal/utils"
 )
 
 type viewState int

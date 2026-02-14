@@ -1,4 +1,4 @@
-module github.com/zhengda-lu/macbroom
+module github.com/lu-zhengda/macbroom
 
 go 1.25.0
 
