@@ -2,7 +2,9 @@ package cli
 
 import (
 	"fmt"
+	"time"
 
+	"github.com/lu-zhengda/macbroom/internal/scancache"
 	"github.com/spf13/cobra"
 )
 
@@ -30,7 +32,36 @@ var scanCmd = &cobra.Command{
 			return fmt.Errorf("scan failed: %w", err)
 		}
 
-		printScanResults(targets)
+		prev, prevErr := scancache.Load(scancache.DefaultPath())
+
+		grouped := make(map[string]*scancache.CategorySnapshot)
+		for _, t := range targets {
+			cs := grouped[t.Category]
+			if cs == nil {
+				cs = &scancache.CategorySnapshot{Name: t.Category}
+				grouped[t.Category] = cs
+			}
+			cs.Size += t.Size
+			cs.Items++
+		}
+		var cats2 []scancache.CategorySnapshot
+		for _, cs := range grouped {
+			cats2 = append(cats2, *cs)
+		}
+		var totalSize int64
+		for _, t := range targets {
+			totalSize += t.Size
+		}
+		curr := scancache.Snapshot{Timestamp: time.Now().UTC(), Categories: cats2, TotalSize: totalSize}
+
+		var diff *scancache.DiffResult
+		if prevErr == nil {
+			d := scancache.Diff(prev, curr)
+			diff = &d
+		}
+
+		printScanResults(targets, diff)
+		_ = scancache.Save(scancache.DefaultPath(), curr)
 		return nil
 	},
 }

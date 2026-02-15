@@ -35,7 +35,7 @@ var uninstallCmd = &cobra.Command{
 			return nil
 		}
 
-		printScanResults(targets)
+		printScanResults(targets, nil)
 
 		var totalSize int64
 		for _, t := range targets {

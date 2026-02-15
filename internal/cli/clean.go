@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/lu-zhengda/macbroom/internal/history"
+	"github.com/lu-zhengda/macbroom/internal/scancache"
 	"github.com/lu-zhengda/macbroom/internal/schedule"
 	"github.com/lu-zhengda/macbroom/internal/trash"
 	"github.com/lu-zhengda/macbroom/internal/utils"
@@ -58,9 +59,38 @@ var cleanCmd = &cobra.Command{
 			return nil
 		}
 
-		if !cleanQuiet {
-			printScanResults(targets)
+		prev, prevErr := scancache.Load(scancache.DefaultPath())
+
+		grouped := make(map[string]*scancache.CategorySnapshot)
+		for _, t := range targets {
+			cs := grouped[t.Category]
+			if cs == nil {
+				cs = &scancache.CategorySnapshot{Name: t.Category}
+				grouped[t.Category] = cs
+			}
+			cs.Size += t.Size
+			cs.Items++
 		}
+		var snapCats []scancache.CategorySnapshot
+		for _, cs := range grouped {
+			snapCats = append(snapCats, *cs)
+		}
+		var snapTotal int64
+		for _, t := range targets {
+			snapTotal += t.Size
+		}
+		curr := scancache.Snapshot{Timestamp: time.Now().UTC(), Categories: snapCats, TotalSize: snapTotal}
+
+		var diff *scancache.DiffResult
+		if prevErr == nil {
+			d := scancache.Diff(prev, curr)
+			diff = &d
+		}
+
+		if !cleanQuiet {
+			printScanResults(targets, diff)
+		}
+		_ = scancache.Save(scancache.DefaultPath(), curr)
 
 		var totalSize int64
 		for _, t := range targets {

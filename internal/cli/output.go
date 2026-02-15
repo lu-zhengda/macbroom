@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/lu-zhengda/macbroom/internal/scancache"
 	"github.com/lu-zhengda/macbroom/internal/scanner"
 	"github.com/lu-zhengda/macbroom/internal/tui"
 	"github.com/lu-zhengda/macbroom/internal/utils"
@@ -17,6 +18,7 @@ import (
 
 var (
 	boldStyle    = lipgloss.NewStyle().Bold(true)
+	dimStyle     = lipgloss.NewStyle().Faint(true)
 	riskModerate = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
 	riskRisky    = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 	totalStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("82"))
@@ -29,7 +31,7 @@ type categoryGroup struct {
 	TotalSize int64
 }
 
-func printScanResults(targets []scanner.Target) {
+func printScanResults(targets []scanner.Target, diff *scancache.DiffResult) {
 	if len(targets) == 0 {
 		fmt.Println("No junk files found.")
 		return
@@ -68,7 +70,12 @@ func printScanResults(targets []scanner.Target) {
 		catColor := tui.CategoryColor(g.Name)
 		header := lipgloss.NewStyle().Bold(true).Foreground(catColor).
 			Render(fmt.Sprintf("%s (%s, %d items)", g.Name, utils.FormatSize(g.TotalSize), len(g.Targets)))
-		fmt.Printf("\n%s\n", header)
+		diffStr := diffIndicator(g.Name, diff)
+		if diffStr != "" {
+			fmt.Printf("\n%s %s\n", header, diffStr)
+		} else {
+			fmt.Printf("\n%s\n", header)
+		}
 		fmt.Println(strings.Repeat("-", 60))
 
 		for _, item := range g.Targets {
@@ -89,6 +96,43 @@ func printScanResults(targets []scanner.Target) {
 	if line := riskSummaryLine(riskSummary(targets)); line != "" {
 		fmt.Printf("%s\n", line)
 	}
+
+	if diff != nil {
+		var deltaStr string
+		if diff.TotalDelta >= 0 {
+			deltaStr = "+" + utils.FormatSize(diff.TotalDelta)
+		} else {
+			deltaStr = "-" + utils.FormatSize(-diff.TotalDelta)
+		}
+		fmt.Printf("  %s\n", dimStyle.Render(fmt.Sprintf("%s since %s", deltaStr, diff.PreviousTimestamp.Format("Jan 2"))))
+	}
+}
+
+// diffIndicator returns a styled string showing how a category changed since the last scan.
+func diffIndicator(name string, diff *scancache.DiffResult) string {
+	if diff == nil {
+		return ""
+	}
+
+	cd, ok := diff.Categories[name]
+	if !ok {
+		return ""
+	}
+
+	if cd.IsNew {
+		return dimStyle.Render("(new)")
+	}
+
+	if cd.Delta == 0 {
+		return dimStyle.Render("unchanged")
+	}
+
+	if cd.Delta > 0 {
+		return riskModerate.Render("+" + utils.FormatSize(cd.Delta))
+	}
+
+	greenStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
+	return greenStyle.Render("-" + utils.FormatSize(-cd.Delta))
 }
 
 func truncatePath(path string, maxLen int) string {
