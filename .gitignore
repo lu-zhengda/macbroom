@@ -1,8 +1,10 @@
 bin/
 dist/
+completions/
 *.exe
 *.test
 *.out
 .DS_Store
-macbroom
+/macbroom
 docs/man/*.1
+.worktrees/

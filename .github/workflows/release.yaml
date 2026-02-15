@@ -23,6 +23,13 @@ jobs:
       - name: Run tests
         run: go test -race ./...
 
+      - name: Generate completions
+        run: |
+          mkdir -p completions
+          go run ./cmd/macbroom --generate-completion bash > completions/macbroom.bash
+          go run ./cmd/macbroom --generate-completion zsh > completions/macbroom.zsh
+          go run ./cmd/macbroom --generate-completion fish > completions/macbroom.fish
+
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"

@@ -18,6 +18,7 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - docs/man/*.1
+      - completions/*
 
 checksum:
   name_template: "checksums.txt"
@@ -30,22 +31,26 @@ changelog:
       - "^test:"
       - "^chore:"
 
-brews:
+homebrew_casks:
   - repository:
       owner: lu-zhengda
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Formula
+    directory: Casks
     homepage: "https://github.com/lu-zhengda/macbroom"
     description: "A lightweight macOS cleanup tool"
     license: "MIT"
-    install: |
-      bin.install "macbroom"
-      bash_output = Utils.safe_popen_read(bin/"macbroom", "--generate-completion", "bash")
-      (bash_completion/"macbroom").write bash_output
-      zsh_output = Utils.safe_popen_read(bin/"macbroom", "--generate-completion", "zsh")
-      (zsh_completion/"_macbroom").write zsh_output
-      fish_output = Utils.safe_popen_read(bin/"macbroom", "--generate-completion", "fish")
-      (fish_completion/"macbroom.fish").write fish_output
-    test: |
-      system "#{bin}/macbroom", "--version"
+    binaries:
+      - macbroom
+    manpages:
+      - docs/man/macbroom.1
+    completions:
+      bash: completions/macbroom.bash
+      zsh: completions/macbroom.zsh
+      fish: completions/macbroom.fish
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/macbroom"]
+          end
