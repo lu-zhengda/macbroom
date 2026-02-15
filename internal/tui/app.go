@@ -1337,7 +1337,7 @@ func (m Model) viewDashboard() string {
 			cursor = "> "
 		}
 
-		dot := lipgloss.NewStyle().Foreground(categoryColor(r.Category)).Render("\u25cf")
+		dot := lipgloss.NewStyle().Foreground(CategoryColor(r.Category)).Render("\u25cf")
 		line := fmt.Sprintf("%s%s %-23s %10s  (%d items)",
 			cursor, dot, r.Category, utils.FormatSize(catSize), len(r.Targets))
 
