@@ -85,6 +85,10 @@ func printScanResults(targets []scanner.Target) {
 	}
 
 	fmt.Printf("\n%s\n", totalStyle.Render(fmt.Sprintf("Total reclaimable: %s", utils.FormatSize(totalSize))))
+
+	if line := riskSummaryLine(riskSummary(targets)); line != "" {
+		fmt.Printf("%s\n", line)
+	}
 }
 
 func truncatePath(path string, maxLen int) string {
