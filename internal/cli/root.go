@@ -136,12 +136,18 @@ func buildEngine() *engine.Engine {
 	if appConfig.Scanners.IOSSimulators {
 		e.Register(scanner.NewSimulatorScanner(""))
 	}
+	if appConfig.Scanners.Python {
+		home := utils.HomeDir()
+		paths := expandPaths(appConfig.LargeFiles.Paths)
+		minAge := config.ParseDuration(appConfig.LargeFiles.MinAge)
+		e.Register(scanner.NewPythonScanner(home, paths, minAge))
+	}
 
 	return e
 }
 
-func selectedCategories(system, browser, xcode, large, docker, node, homebrew, simulator bool) []string {
-	if !system && !browser && !xcode && !large && !docker && !node && !homebrew && !simulator {
+func selectedCategories(system, browser, xcode, large, docker, node, homebrew, simulator, python bool) []string {
+	if !system && !browser && !xcode && !large && !docker && !node && !homebrew && !simulator && !python {
 		return nil
 	}
 	var cats []string
@@ -168,6 +174,9 @@ func selectedCategories(system, browser, xcode, large, docker, node, homebrew, s
 	}
 	if simulator {
 		cats = append(cats, "iOS Simulators")
+	}
+	if python {
+		cats = append(cats, "Python")
 	}
 	return cats
 }
