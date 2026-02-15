@@ -17,7 +17,6 @@ archives:
       - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
-      - docs/man/*.1
       - completions/*
 
 checksum:
@@ -42,8 +41,6 @@ homebrew_casks:
     license: "MIT"
     binaries:
       - macbroom
-    manpages:
-      - docs/man/macbroom.1
     completions:
       bash: completions/macbroom.bash
       zsh: completions/macbroom.zsh
