@@ -167,6 +167,45 @@ func TestScanGroupedWithProgress_ContextCancelled(t *testing.T) {
 	}
 }
 
+func TestScanGroupedWithProgress_WithExcludeFunc(t *testing.T) {
+	e := New()
+	e.Register(&mockScanner{name: "A", targets: []scanner.Target{
+		{Path: "/a1", Size: 100},
+		{Path: "/a2", Size: 200},
+	}})
+	e.SetExcludeFunc(func(path string) bool {
+		return path == "/a1"
+	})
+
+	var mu sync.Mutex
+	var progressTargets []scanner.Target
+	results := e.ScanGroupedWithProgress(context.Background(), 2, func(p ScanProgress) {
+		if p.Status == ScanDone {
+			mu.Lock()
+			progressTargets = append(progressTargets, p.Targets...)
+			mu.Unlock()
+		}
+	})
+
+	// Check results
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result group, got %d", len(results))
+	}
+	if len(results[0].Targets) != 1 {
+		t.Fatalf("expected 1 target after exclusion, got %d", len(results[0].Targets))
+	}
+	if results[0].Targets[0].Path != "/a2" {
+		t.Errorf("expected /a2, got %s", results[0].Targets[0].Path)
+	}
+
+	// Check progress callback also got filtered results
+	mu.Lock()
+	defer mu.Unlock()
+	if len(progressTargets) != 1 {
+		t.Fatalf("expected 1 target in progress callback, got %d", len(progressTargets))
+	}
+}
+
 func TestScanAll_WithExcludeFunc(t *testing.T) {
 	targets := []scanner.Target{
 		{Path: "/tmp/cache1", Size: 1024, Category: "test"},

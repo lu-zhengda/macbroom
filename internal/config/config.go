@@ -239,10 +239,18 @@ func ParseSize(s string) (int64, error) {
 // against the base name. Patterns ending in "/**" are treated as
 // directory prefix matches.
 func (c *Config) IsExcluded(path string) bool {
+	home, _ := os.UserHomeDir()
 	for _, pattern := range c.Exclude {
+		p := pattern
+		if home != "" && strings.HasPrefix(p, "~/") {
+			p = home + p[1:] // ~/foo -> /Users/x/foo
+		} else if p == "~" && home != "" {
+			p = home
+		}
+
 		// Handle "dir/**" as a prefix match.
-		if strings.HasSuffix(pattern, "/**") {
-			prefix := strings.TrimSuffix(pattern, "/**")
+		if strings.HasSuffix(p, "/**") {
+			prefix := strings.TrimSuffix(p, "/**")
 			if strings.HasPrefix(path, prefix+"/") || path == prefix {
 				return true
 			}
@@ -250,11 +258,11 @@ func (c *Config) IsExcluded(path string) bool {
 		}
 
 		// Match against the full path.
-		if matched, _ := filepath.Match(pattern, path); matched {
+		if matched, _ := filepath.Match(p, path); matched {
 			return true
 		}
 		// Match against the base name (for patterns like "*.log").
-		if matched, _ := filepath.Match(pattern, filepath.Base(path)); matched {
+		if matched, _ := filepath.Match(p, filepath.Base(path)); matched {
 			return true
 		}
 	}

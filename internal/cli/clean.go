@@ -39,7 +39,10 @@ var cleanCmd = &cobra.Command{
 	Short: "Clean selected junk files",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(cleanExclude) > 0 {
-			appConfig.Exclude = append(appConfig.Exclude, cleanExclude...)
+			combined := make([]string, 0, len(appConfig.Exclude)+len(cleanExclude))
+			combined = append(combined, appConfig.Exclude...)
+			combined = append(combined, cleanExclude...)
+			appConfig.Exclude = combined
 		}
 		e := buildEngine()
 		cats := selectedCategories(cleanFilter)

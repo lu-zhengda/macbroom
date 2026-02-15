@@ -78,8 +78,9 @@ func printScanResults(targets []scanner.Target) {
 			} else if item.Risk == scanner.Moderate {
 				risk = " " + riskModerate.Render("[Moderate]")
 			}
-			sizeStr := boldStyle.Render(utils.FormatSize(item.Size))
-			fmt.Printf("  %-40s %10s%s\n", truncatePath(item.Path, 40), sizeStr, risk)
+			padded := fmt.Sprintf("%10s", utils.FormatSize(item.Size))
+			sizeStr := boldStyle.Render(padded)
+			fmt.Printf("  %-40s %s%s\n", truncatePath(item.Path, 40), sizeStr, risk)
 		}
 	}
 

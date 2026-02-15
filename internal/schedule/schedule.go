@@ -123,6 +123,14 @@ func GeneratePlistWithBinary(timeStr, interval, binary string) string {
 	return GeneratePlistWithCategories(timeStr, interval, binary, nil)
 }
 
+var validCategories = map[string]bool{
+	"system": true, "browser": true, "xcode": true, "large": true,
+	"docker": true, "node": true, "homebrew": true, "simulator": true,
+	"python": true, "rust": true, "go": true, "jetbrains": true,
+	"maven": true, "gradle": true, "ruby": true,
+	"dev": true, "caches": true, "all": true,
+}
+
 // GeneratePlistWithCategories generates a plist using the specified binary
 // path and optional category flags. Each category name is converted to a
 // CLI flag (e.g., "system" becomes "--system").
@@ -134,6 +142,9 @@ func GeneratePlistWithCategories(timeStr, interval, binary string, categories []
 
 	var extraArgs []string
 	for _, cat := range categories {
+		if !validCategories[cat] {
+			return ""
+		}
 		extraArgs = append(extraArgs, "--"+cat)
 	}
 

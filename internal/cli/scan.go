@@ -16,7 +16,10 @@ var scanCmd = &cobra.Command{
 	Short: "Scan for junk files and reclaimable space",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(scanExclude) > 0 {
-			appConfig.Exclude = append(appConfig.Exclude, scanExclude...)
+			combined := make([]string, 0, len(appConfig.Exclude)+len(scanExclude))
+			combined = append(combined, appConfig.Exclude...)
+			combined = append(combined, scanExclude...)
+			appConfig.Exclude = combined
 		}
 		e := buildEngine()
 		cats := selectedCategories(scanFilter)
