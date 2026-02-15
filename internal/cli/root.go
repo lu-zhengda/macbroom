@@ -172,7 +172,31 @@ func buildEngine() *engine.Engine {
 	return e
 }
 
-func selectedCategories(system, browser, xcode, large, docker, node, homebrew, simulator, python, rust, golang, jetbrains, maven, gradle, ruby bool) []string {
+func selectedCategories(system, browser, xcode, large, docker, node, homebrew, simulator, python, rust, golang, jetbrains, maven, gradle, ruby, dev, caches, all bool) []string {
+	// --all overrides everything.
+	if all {
+		return nil
+	}
+
+	// Expand --dev profile.
+	if dev {
+		node = true
+		python = true
+		rust = true
+		golang = true
+		jetbrains = true
+		maven = true
+		gradle = true
+		ruby = true
+	}
+
+	// Expand --caches profile.
+	if caches {
+		system = true
+		browser = true
+		homebrew = true
+	}
+
 	if !system && !browser && !xcode && !large && !docker && !node && !homebrew && !simulator && !python && !rust && !golang && !jetbrains && !maven && !gradle && !ruby {
 		return nil
 	}
