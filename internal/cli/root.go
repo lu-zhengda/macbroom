@@ -148,12 +148,16 @@ func buildEngine() *engine.Engine {
 		minAge := config.ParseDuration(appConfig.LargeFiles.MinAge)
 		e.Register(scanner.NewRustScanner(home, paths, minAge))
 	}
+	if appConfig.Scanners.Go {
+		home := utils.HomeDir()
+		e.Register(scanner.NewGoScanner(home))
+	}
 
 	return e
 }
 
-func selectedCategories(system, browser, xcode, large, docker, node, homebrew, simulator, python, rust bool) []string {
-	if !system && !browser && !xcode && !large && !docker && !node && !homebrew && !simulator && !python && !rust {
+func selectedCategories(system, browser, xcode, large, docker, node, homebrew, simulator, python, rust, golang bool) []string {
+	if !system && !browser && !xcode && !large && !docker && !node && !homebrew && !simulator && !python && !rust && !golang {
 		return nil
 	}
 	var cats []string
@@ -186,6 +190,9 @@ func selectedCategories(system, browser, xcode, large, docker, node, homebrew, s
 	}
 	if rust {
 		cats = append(cats, "Rust")
+	}
+	if golang {
+		cats = append(cats, "Go")
 	}
 	return cats
 }

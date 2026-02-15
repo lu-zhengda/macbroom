@@ -40,6 +40,7 @@ type ScannersConfig struct {
 	IOSSimulators bool `yaml:"ios_simulators"`
 	Python        bool `yaml:"python"`
 	Rust          bool `yaml:"rust"`
+	Go            bool `yaml:"go"`
 }
 
 // SpaceLensConfig controls the space-lens disk visualizer.
@@ -77,6 +78,7 @@ func Default() *Config {
 			IOSSimulators: true,
 			Python:        true,
 			Rust:          true,
+			Go:            true,
 		},
 		SpaceLens: SpaceLensConfig{
 			DefaultPath: "/",
