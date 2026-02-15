@@ -17,6 +17,7 @@ var (
 	colorSubtle    = lipgloss.Color("236")
 	colorText      = lipgloss.Color("252")
 	colorWhite     = lipgloss.Color("255")
+	colorDangerBg  = lipgloss.Color("52")
 )
 
 // ---------------------------------------------------------------------------
@@ -24,18 +25,18 @@ var (
 // ---------------------------------------------------------------------------
 
 var categoryColors = map[string]lipgloss.Color{
-	"System Junk":      lipgloss.Color("75"),
-	"Browser Cache":    lipgloss.Color("214"),
-	"Xcode Junk":       lipgloss.Color("141"),
+	"System Junk":       lipgloss.Color("75"),
+	"Browser Cache":     lipgloss.Color("214"),
+	"Xcode Junk":        lipgloss.Color("141"),
 	"Large & Old Files": lipgloss.Color("223"),
-	"Docker":           lipgloss.Color("39"),
-	"Node.js":          lipgloss.Color("119"),
-	"Homebrew":         lipgloss.Color("208"),
-	"iOS Simulators":   lipgloss.Color("183"),
-	"Python":           lipgloss.Color("220"),
-	"Rust":             lipgloss.Color("208"),
-	"Go":               lipgloss.Color("75"),
-	"JetBrains":        lipgloss.Color("171"),
+	"Docker":            lipgloss.Color("39"),
+	"Node.js":           lipgloss.Color("119"),
+	"Homebrew":          lipgloss.Color("208"),
+	"iOS Simulators":    lipgloss.Color("183"),
+	"Python":            lipgloss.Color("220"),
+	"Rust":              lipgloss.Color("208"),
+	"Go":                lipgloss.Color("75"),
+	"JetBrains":         lipgloss.Color("171"),
 }
 
 // categoryColor returns the theme color for a scan category.
