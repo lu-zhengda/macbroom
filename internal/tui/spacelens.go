@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/lu-zhengda/macbroom/internal/scanner"
 	"github.com/lu-zhengda/macbroom/internal/utils"
 )
@@ -80,7 +81,7 @@ func (m SpaceLensModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m SpaceLensModel) View() string {
-	s := titleStyle.Render("macbroom -- Space Lens") + "\n"
+	s := renderHeader("Space Lens")
 	s += dimStyle.Render(m.path) + "\n\n"
 
 	if m.loading {
@@ -128,7 +129,7 @@ func (m SpaceLensModel) View() string {
 		s += dimStyle.Render(fmt.Sprintf("\n  ... and %d more items", len(m.nodes)-30)) + "\n"
 	}
 
-	s += helpStyle.Render("\nj/k navigate | enter drill into folder | h/backspace go up | q quit")
+	s += renderFooter("j/k navigate | enter drill into folder | h/backspace go up | q quit")
 	return s
 }
 
@@ -141,5 +142,7 @@ func renderBar(size, maxSize int64, width int) string {
 	if filled == 0 && size > 0 {
 		filled = 1
 	}
-	return "|" + strings.Repeat("#", filled) + strings.Repeat(".", width-filled) + "|"
+	color := barColor(ratio)
+	fillStyle := lipgloss.NewStyle().Foreground(color)
+	return "[" + fillStyle.Render(strings.Repeat("\u2588", filled)) + strings.Repeat("\u2591", width-filled) + "]"
 }

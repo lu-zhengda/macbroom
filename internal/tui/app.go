@@ -166,7 +166,7 @@ type Model struct {
 func New(e *engine.Engine) Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("170"))
+	sp.Style = lipgloss.NewStyle().Foreground(colorPrimary)
 
 	return Model{
 		engine:         e,
@@ -1021,7 +1021,7 @@ func (m Model) doClean() tea.Cmd {
 
 func (m Model) View() string {
 	if m.scanning {
-		return titleStyle.Render("macbroom") + "\n\n" + m.spinner.View() + " Scanning your Mac...\n"
+		return renderHeader("Clean") + "\n" + m.spinner.View() + " Scanning your Mac...\n"
 	}
 
 	switch m.currentView {
@@ -1061,7 +1061,7 @@ func (m Model) View() string {
 }
 
 func (m Model) viewMenu() string {
-	s := titleStyle.Render("macbroom") + "\n\n"
+	s := renderHeader()
 
 	for i, item := range menuItems {
 		if i == m.cursor {
@@ -1071,16 +1071,16 @@ func (m Model) viewMenu() string {
 		}
 	}
 
-	s += helpStyle.Render("\n\nj/k navigate | enter select | q quit")
+	s += renderFooter("j/k navigate | enter select | q quit")
 	return s
 }
 
 func (m Model) viewDashboard() string {
-	s := titleStyle.Render("macbroom -- Clean") + "\n\n"
+	s := renderHeader("Clean")
 
 	if len(m.results) == 0 {
 		s += "No junk found. Your Mac is clean!\n"
-		return s + helpStyle.Render("\nesc back | q quit")
+		return s + renderFooter("esc back | q quit")
 	}
 
 	var totalSize int64
@@ -1092,19 +1092,23 @@ func (m Model) viewDashboard() string {
 		totalSize += catSize
 
 		cursor := "  "
-		style := dimStyle
 		if i == m.cursor {
 			cursor = "> "
-			style = selectedStyle
 		}
 
-		line := fmt.Sprintf("%s%-25s %10s  (%d items)",
-			cursor, r.Category, utils.FormatSize(catSize), len(r.Targets))
-		s += style.Render(line) + "\n"
+		dot := lipgloss.NewStyle().Foreground(categoryColor(r.Category)).Render("\u25cf")
+		line := fmt.Sprintf("%s%s %-23s %10s  (%d items)",
+			cursor, dot, r.Category, utils.FormatSize(catSize), len(r.Targets))
+
+		if i == m.cursor {
+			s += selectedStyle.Render(line) + "\n"
+		} else {
+			s += line + "\n"
+		}
 	}
 
 	s += "\n" + statusBarStyle.Render(fmt.Sprintf(" Total reclaimable: %s ", utils.FormatSize(totalSize)))
-	s += helpStyle.Render("\n\nj/k navigate | enter view details | esc back | q quit")
+	s += renderFooter("j/k navigate | enter view details | esc back | q quit")
 	return s
 }
 
@@ -1114,7 +1118,7 @@ func (m Model) viewCategory() string {
 	}
 
 	r := m.results[m.categoryIdx]
-	s := titleStyle.Render("macbroom -- "+r.Category) + "\n\n"
+	s := renderHeader("Clean", r.Category)
 
 	if r.Error != nil {
 		s += fmt.Sprintf("Error scanning: %v\n", r.Error)
@@ -1165,7 +1169,7 @@ func (m Model) viewCategory() string {
 	}
 
 	s += "\n" + statusBarStyle.Render(fmt.Sprintf(" Selected: %d items (%s) ", selectedCount, utils.FormatSize(selectedSize)))
-	s += helpStyle.Render("\n\nj/k navigate | space toggle | a toggle all | d delete | esc back | q quit")
+	s += renderFooter("j/k navigate | space toggle | a toggle all | d delete | esc back | q quit")
 	return s
 }
 
@@ -1176,13 +1180,8 @@ func (m Model) viewConfirm() string {
 
 	r := m.results[m.categoryIdx]
 
-	dangerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("196")).
-		Background(lipgloss.Color("52")).
-		Padding(0, 1)
-
-	s := dangerStyle.Render(" CONFIRM DELETION ") + "\n\n"
+	s := renderHeader("Clean", r.Category, "Confirm")
+	s += dangerBannerStyle.Render(" CONFIRM DELETION ") + "\n\n"
 
 	var selectedSize int64
 	var selectedCount int
@@ -1205,32 +1204,28 @@ func (m Model) viewConfirm() string {
 
 	s += "\n"
 	if hasRisky {
-		warnStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214"))
 		s += warnStyle.Render("  WARNING: Selection includes risky items that may contain user data!") + "\n\n"
 	}
 
 	s += fmt.Sprintf("  %d items | %s | will be moved to Trash (recoverable)\n", selectedCount, utils.FormatSize(selectedSize))
-	s += helpStyle.Render("\n  y confirm | n cancel | q quit")
+	s += renderFooter("y confirm | n cancel | q quit")
 	return s
 }
 
 func (m Model) viewResult() string {
-	s := titleStyle.Render("macbroom -- Cleanup Complete") + "\n\n"
-
-	successStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("82"))
-	failStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
+	s := renderHeader("Cleanup Complete")
 
 	s += successStyle.Render(fmt.Sprintf("  Cleaned: %d items (%s freed)", m.lastCleaned, utils.FormatSize(m.lastSize))) + "\n"
 	if m.lastFailed > 0 {
 		s += failStyle.Render(fmt.Sprintf("  Failed:  %d items", m.lastFailed)) + "\n"
 	}
 
-	s += helpStyle.Render("\n  r re-scan | esc menu | q quit")
+	s += renderFooter("r re-scan | esc menu | q quit")
 	return s
 }
 
 func (m Model) viewSpaceLens() string {
-	s := titleStyle.Render("macbroom -- Space Lens") + "\n"
+	s := renderHeader("Space Lens")
 
 	if m.slLoading {
 		s += dimStyle.Render(m.slPath) + "\n\n"
@@ -1242,7 +1237,7 @@ func (m Model) viewSpaceLens() string {
 			}
 			s += dimStyle.Render("  "+name) + "\n"
 		}
-		s += helpStyle.Render("\nesc cancel")
+		s += renderFooter("esc cancel")
 		return s
 	}
 
@@ -1256,7 +1251,7 @@ func (m Model) viewSpaceLens() string {
 
 	if len(m.slNodes) == 0 {
 		s += "Empty directory.\n"
-		return s + helpStyle.Render("\nesc back | q quit")
+		return s + renderFooter("esc back | q quit")
 	}
 
 	maxSize := m.slNodes[0].Size
@@ -1305,7 +1300,7 @@ func (m Model) viewSpaceLens() string {
 		s += dimStyle.Render(fmt.Sprintf("  [%d-%d of %d]", m.slScrollOffset+1, end, total)) + "\n"
 	}
 
-	s += helpStyle.Render("\nj/k navigate | enter drill in | d delete | h go up | esc back | q quit")
+	s += renderFooter("j/k navigate | enter drill in | d delete | h go up | esc back | q quit")
 	return s
 }
 
@@ -1314,21 +1309,16 @@ func (m Model) viewSpaceLensConfirm() string {
 		return "Nothing to confirm"
 	}
 
-	dangerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("196")).
-		Background(lipgloss.Color("52")).
-		Padding(0, 1)
-
-	s := dangerStyle.Render(" DELETE ITEM ") + "\n\n"
+	s := renderHeader("Space Lens", "Confirm")
+	s += dangerBannerStyle.Render(" DELETE ITEM ") + "\n\n"
 	s += fmt.Sprintf("  Delete %s (%s)? (y/n)\n", m.slDeleteTarget.Name, utils.FormatSize(m.slDeleteTarget.Size))
 	s += dimStyle.Render(fmt.Sprintf("\n  Path: %s", m.slDeleteTarget.Path)) + "\n"
-	s += helpStyle.Render("\n  y confirm | n cancel | q quit")
+	s += renderFooter("y confirm | n cancel | q quit")
 	return s
 }
 
 func (m Model) viewDupes() string {
-	s := titleStyle.Render("macbroom -- Duplicates") + "\n"
+	s := renderHeader("Duplicates")
 
 	if m.dupLoading {
 		s += "\n" + m.spinner.View() + " Scanning for duplicates...\n"
@@ -1339,13 +1329,13 @@ func (m Model) viewDupes() string {
 			}
 			s += dimStyle.Render("  "+name) + "\n"
 		}
-		s += helpStyle.Render("\nesc cancel")
+		s += renderFooter("esc cancel")
 		return s
 	}
 
 	if len(m.dupGroups) == 0 {
 		s += "\nNo duplicates found!\n"
-		return s + helpStyle.Render("\nesc back | q quit")
+		return s + renderFooter("esc back | q quit")
 	}
 
 	var totalWasted int64
@@ -1426,18 +1416,13 @@ func (m Model) viewDupes() string {
 	}
 
 	s += "\n" + statusBarStyle.Render(fmt.Sprintf(" Selected: %d copies (%s) ", selectedCount, utils.FormatSize(selectedSize)))
-	s += helpStyle.Render("\n\nj/k navigate | space toggle | d delete selected | esc back | q quit")
+	s += renderFooter("j/k navigate | space toggle | d delete selected | esc back | q quit")
 	return s
 }
 
 func (m Model) viewDupesConfirm() string {
-	dangerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("196")).
-		Background(lipgloss.Color("52")).
-		Padding(0, 1)
-
-	s := dangerStyle.Render(" CONFIRM DUPLICATE DELETION ") + "\n\n"
+	s := renderHeader("Duplicates", "Confirm")
+	s += dangerBannerStyle.Render(" CONFIRM DUPLICATE DELETION ") + "\n\n"
 
 	var selectedSize int64
 	var selectedCount int
@@ -1453,37 +1438,34 @@ func (m Model) viewDupesConfirm() string {
 	s += fmt.Sprintf("  %d duplicate copies | %s | will be moved to Trash (recoverable)\n",
 		selectedCount, utils.FormatSize(selectedSize))
 	s += dimStyle.Render("\n  One copy per group will be kept.") + "\n"
-	s += helpStyle.Render("\n  y confirm | n cancel | q quit")
+	s += renderFooter("y confirm | n cancel | q quit")
 	return s
 }
 
 func (m Model) viewDupesResult() string {
-	s := titleStyle.Render("macbroom -- Duplicates Cleaned") + "\n\n"
-
-	successStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("82"))
-	failStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
+	s := renderHeader("Duplicates", "Complete")
 
 	s += successStyle.Render(fmt.Sprintf("  Deleted: %d copies (%s freed)", m.dupDeleted, utils.FormatSize(m.dupFreed))) + "\n"
 	if m.dupFailed > 0 {
 		s += failStyle.Render(fmt.Sprintf("  Failed:  %d items", m.dupFailed)) + "\n"
 	}
 
-	s += helpStyle.Render("\n  r re-scan | esc menu | q quit")
+	s += renderFooter("r re-scan | esc menu | q quit")
 	return s
 }
 
 func (m Model) viewUninstallInput() string {
-	s := titleStyle.Render("macbroom -- Uninstall") + "\n\n"
+	s := renderHeader("Uninstall")
 
 	if m.uiLoading {
 		s += m.spinner.View() + " Searching for app files...\n"
-		s += helpStyle.Render("\nesc cancel")
+		s += renderFooter("esc cancel")
 		return s
 	}
 
 	if len(m.uiApps) == 0 {
 		s += "  No applications found.\n"
-		return s + helpStyle.Render("\nesc back | q quit")
+		return s + renderFooter("esc back | q quit")
 	}
 
 	selectedCount := len(m.uiAppSelected)
@@ -1520,16 +1502,16 @@ func (m Model) viewUninstallInput() string {
 		s += dimStyle.Render(fmt.Sprintf("  [%d-%d of %d]", m.uiAppScrollOffset+1, end, total)) + "\n"
 	}
 
-	s += helpStyle.Render("\n\nj/k navigate | space select | enter scan selected | esc back | q quit")
+	s += renderFooter("j/k navigate | space select | enter scan selected | esc back | q quit")
 	return s
 }
 
 func (m Model) viewUninstallResults() string {
-	s := titleStyle.Render("macbroom -- Uninstall") + "\n\n"
+	s := renderHeader("Uninstall", "Files")
 
 	if len(m.uiTargets) == 0 {
 		s += "  No related files found for the selected apps.\n"
-		return s + helpStyle.Render("\nesc back | q quit")
+		return s + renderFooter("esc back | q quit")
 	}
 
 	// Build a summary of selected app names.
@@ -1591,18 +1573,13 @@ func (m Model) viewUninstallResults() string {
 	}
 
 	s += "\n" + statusBarStyle.Render(fmt.Sprintf(" Selected: %d items (%s) ", selectedFileCount, utils.FormatSize(selectedSize)))
-	s += helpStyle.Render("\n\nj/k navigate | space toggle | a toggle all | d delete | esc back | q quit")
+	s += renderFooter("j/k navigate | space toggle | a toggle all | d delete | esc back | q quit")
 	return s
 }
 
 func (m Model) viewUninstallConfirm() string {
-	dangerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("196")).
-		Background(lipgloss.Color("52")).
-		Padding(0, 1)
-
-	s := dangerStyle.Render(" CONFIRM UNINSTALL ") + "\n\n"
+	s := renderHeader("Uninstall", "Confirm")
+	s += dangerBannerStyle.Render(" CONFIRM UNINSTALL ") + "\n\n"
 
 	var selectedSize int64
 	var selectedCount int
@@ -1615,28 +1592,24 @@ func (m Model) viewUninstallConfirm() string {
 	}
 
 	s += fmt.Sprintf("\n  %d items | %s | will be moved to Trash (recoverable)\n", selectedCount, utils.FormatSize(selectedSize))
-	s += helpStyle.Render("\n  y confirm | n cancel | q quit")
+	s += renderFooter("y confirm | n cancel | q quit")
 	return s
 }
 
 func (m Model) viewMaintain() string {
-	s := titleStyle.Render("macbroom -- Maintenance") + "\n\n"
-	s += m.spinner.View() + " Running maintenance tasks...\n"
+	s := renderHeader("Maintenance")
+	s += "\n" + m.spinner.View() + " Running maintenance tasks...\n"
 	return s
 }
 
 func (m Model) viewMaintainResult() string {
-	s := titleStyle.Render("macbroom -- Maintenance Complete") + "\n\n"
-
-	successStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("82"))
-	failStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
-	skipStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	s := renderHeader("Maintenance", "Complete")
 
 	for _, r := range m.maintainResults {
 		if r.Success {
 			s += successStyle.Render(fmt.Sprintf("  [OK]     %s", r.Task.Name)) + "\n"
 		} else if r.Task.NeedsSudo {
-			s += skipStyle.Render(fmt.Sprintf("  [SKIP]   %s (requires sudo)", r.Task.Name)) + "\n"
+			s += warnStyle.Render(fmt.Sprintf("  [SKIP]   %s (requires sudo)", r.Task.Name)) + "\n"
 		} else {
 			s += failStyle.Render(fmt.Sprintf("  [FAIL]   %s: %v", r.Task.Name, r.Error)) + "\n"
 		}
@@ -1653,7 +1626,7 @@ func (m Model) viewMaintainResult() string {
 		s += dimStyle.Render("\n  Tip: run 'macbroom maintain' in terminal for sudo tasks") + "\n"
 	}
 
-	s += helpStyle.Render("\nesc back | q quit")
+	s += renderFooter("esc back | q quit")
 	return s
 }
 
