@@ -3,11 +3,15 @@ package tui
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/lu-zhengda/macbroom/internal/dupes"
 	"github.com/lu-zhengda/macbroom/internal/engine"
+	"github.com/lu-zhengda/macbroom/internal/history"
 	"github.com/lu-zhengda/macbroom/internal/maintain"
 	"github.com/lu-zhengda/macbroom/internal/scanner"
 	"github.com/lu-zhengda/macbroom/internal/trash"
@@ -23,8 +27,15 @@ const (
 	viewConfirm
 	viewResult
 	viewSpaceLens
+	viewSpaceLensConfirm
 	viewMaintain
 	viewMaintainResult
+	viewDupes
+	viewDupesResult
+	viewDupesConfirm
+	viewUninstallInput
+	viewUninstallResults
+	viewUninstallConfirm
 )
 
 type scanDoneMsg struct {
@@ -50,6 +61,30 @@ type maintainDoneMsg struct {
 	results []maintain.Result
 }
 
+type dupesDoneMsg struct {
+	groups []dupes.Group
+}
+
+type dupesProgressMsg struct {
+	path string
+}
+
+type dupesCleanDoneMsg struct {
+	deleted int
+	failed  int
+	freed   int64
+}
+
+type uninstallScanDoneMsg struct {
+	targets []scanner.Target
+}
+
+type uninstallCleanDoneMsg struct {
+	deleted int
+	failed  int
+	freed   int64
+}
+
 // menuItem represents a main menu option.
 type menuItem struct {
 	label       string
@@ -60,6 +95,8 @@ var menuItems = []menuItem{
 	{"Clean", "Scan and remove junk files"},
 	{"Space Lens", "Visualize disk space usage"},
 	{"Maintenance", "Run system maintenance tasks"},
+	{"Duplicates", "Find and remove duplicate files"},
+	{"Uninstall", "Remove apps and all related files"},
 }
 
 type Model struct {
@@ -80,16 +117,45 @@ type Model struct {
 	lastSize    int64
 
 	// Space Lens state
-	slPath       string
-	slNodes      []scanner.SpaceLensNode
-	slCursor     int
-	slLoading    bool
-	slScanning   string // current item being scanned
-	slCancel     context.CancelFunc
-	slProgressCh chan string
+	slPath         string
+	slNodes        []scanner.SpaceLensNode
+	slCursor       int
+	slScrollOffset int
+	slLoading      bool
+	slScanning     string // current item being scanned
+	slCancel       context.CancelFunc
+	slProgressCh   chan string
+	slDeleteTarget *scanner.SpaceLensNode
 
 	// Maintenance state
 	maintainResults []maintain.Result
+
+	// Duplicates state
+	dupGroups       []dupes.Group
+	dupLoading      bool
+	dupScanning     string // current file being scanned
+	dupCancel       context.CancelFunc
+	dupProgressCh   chan string
+	dupCursor       int
+	dupScrollOffset int
+	dupSelected     map[string]bool // key: "groupIdx:fileIdx", tracks copies to delete
+	dupDeleted      int
+	dupFailed       int
+	dupFreed        int64
+
+	// Uninstall state
+	uiApps           []string       // installed app names
+	uiAppSelected   map[int]bool   // multi-select for apps
+	uiAppCursor     int
+	uiAppScrollOffset int
+	uiTargets        []scanner.Target
+	uiLoading        bool
+	uiCursor         int
+	uiScrollOffset2  int            // scroll offset for results view
+	uiSelected       map[int]bool   // selected files to delete
+	uiDeleted        int
+	uiFailed         int
+	uiFreed          int64
 
 	spinner spinner.Model
 
@@ -103,10 +169,12 @@ func New(e *engine.Engine) Model {
 	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("170"))
 
 	return Model{
-		engine:   e,
-		selected: make(map[int]bool),
-		spinner:  sp,
-		slPath:   "/",
+		engine:         e,
+		selected:       make(map[int]bool),
+		spinner:        sp,
+		slPath:         "/",
+		uiAppSelected:  make(map[int]bool),
+		uiSelected:     make(map[int]bool),
 	}
 }
 
@@ -166,7 +234,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if m.scanning || m.slLoading || m.currentView == viewMaintain {
+		if m.scanning || m.slLoading || m.dupLoading || m.uiLoading || m.currentView == viewMaintain {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -184,6 +252,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastFailed = msg.failed
 		m.lastSize = msg.size
 		m.currentView = viewResult
+
+		// Record cleanup history.
+		if msg.cleaned > 0 && m.categoryIdx < len(m.results) {
+			h := history.New(history.DefaultPath())
+			_ = h.Record(history.Entry{
+				Timestamp:  time.Now(),
+				Category:   m.results[m.categoryIdx].Category,
+				Items:      msg.cleaned,
+				BytesFreed: msg.size,
+				Method:     "trash",
+			})
+		}
+
 		return m, nil
 
 	case spaceLensProgressMsg:
@@ -200,6 +281,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.slScanning = ""
 		m.slCancel = nil
 		m.slProgressCh = nil
+		m.slScrollOffset = 0
 		return m, nil
 
 	case maintainDoneMsg:
@@ -207,8 +289,62 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentView = viewMaintainResult
 		return m, nil
 
+	case dupesProgressMsg:
+		m.dupScanning = msg.path
+		if m.dupProgressCh != nil {
+			return m, listenDupesProgress(m.dupProgressCh)
+		}
+		return m, nil
+
+	case dupesDoneMsg:
+		m.dupLoading = false
+		m.dupGroups = msg.groups
+		m.dupScanning = ""
+		m.dupCancel = nil
+		m.dupProgressCh = nil
+		m.dupCursor = 0
+		m.dupScrollOffset = 0
+		// Pre-select all copies (skip index 0 in each group = the "keep" file).
+		m.dupSelected = make(map[string]bool)
+		for gi, g := range m.dupGroups {
+			for fi := 1; fi < len(g.Files); fi++ {
+				m.dupSelected[fmt.Sprintf("%d:%d", gi, fi)] = true
+			}
+		}
+		return m, nil
+
+	case dupesCleanDoneMsg:
+		m.dupDeleted = msg.deleted
+		m.dupFailed = msg.failed
+		m.dupFreed = msg.freed
+		m.currentView = viewDupesResult
+		return m, nil
+
+	case uninstallScanDoneMsg:
+		m.uiLoading = false
+		m.uiTargets = msg.targets
+		m.uiCursor = 0
+		m.uiScrollOffset2 = 0
+		m.uiSelected = make(map[int]bool)
+		for i := range msg.targets {
+			m.uiSelected[i] = true
+		}
+		m.currentView = viewUninstallResults
+		return m, nil
+
+	case uninstallCleanDoneMsg:
+		m.uiDeleted = msg.deleted
+		m.uiFailed = msg.failed
+		m.uiFreed = msg.freed
+		// Re-use viewResult for the uninstall result display.
+		m.lastCleaned = msg.deleted
+		m.lastFailed = msg.failed
+		m.lastSize = msg.freed
+		m.currentView = viewResult
+		return m, nil
+
 	case tea.KeyMsg:
-		// Global quit
+		// Global quit.
 		if msg.String() == "ctrl+c" || msg.String() == "q" {
 			return m, tea.Quit
 		}
@@ -226,10 +362,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateResult(msg)
 		case viewSpaceLens:
 			return m.updateSpaceLens(msg)
+		case viewSpaceLensConfirm:
+			return m.updateSpaceLensConfirm(msg)
 		case viewMaintain:
 			// waiting for results, no input
 		case viewMaintainResult:
 			return m.updateMaintainResult(msg)
+		case viewDupes:
+			return m.updateDupes(msg)
+		case viewDupesConfirm:
+			return m.updateDupesConfirm(msg)
+		case viewDupesResult:
+			return m.updateDupesResult(msg)
+		case viewUninstallInput:
+			return m.updateUninstallInput(msg)
+		case viewUninstallResults:
+			return m.updateUninstallResults(msg)
+		case viewUninstallConfirm:
+			return m.updateUninstallConfirm(msg)
 		}
 	}
 
@@ -255,6 +405,7 @@ func (m Model) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case 1: // Space Lens
 			m.slLoading = true
 			m.slCursor = 0
+			m.slScrollOffset = 0
 			m.slPath = "/"
 			m.currentView = viewSpaceLens
 			cancel, ch, cmd := startSpaceLens(m.slPath)
@@ -264,6 +415,24 @@ func (m Model) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case 2: // Maintenance
 			m.currentView = viewMaintain
 			return m, tea.Batch(m.doMaintain(), m.spinner.Tick)
+		case 3: // Duplicates
+			m.dupLoading = true
+			m.dupCursor = 0
+			m.dupScrollOffset = 0
+			m.currentView = viewDupes
+			cancel, ch, cmd := startDupesScan()
+			m.dupCancel = cancel
+			m.dupProgressCh = ch
+			return m, tea.Batch(cmd, m.spinner.Tick)
+		case 4: // Uninstall
+			s := scanner.NewAppScanner("", "")
+			m.uiApps = s.ListApps()
+			m.uiAppSelected = make(map[int]bool)
+			m.uiAppCursor = 0
+			m.uiAppScrollOffset = 0
+			m.uiTargets = nil
+			m.uiSelected = make(map[int]bool)
+			m.currentView = viewUninstallInput
 		}
 	}
 	return m, nil
@@ -402,24 +571,30 @@ func (m Model) updateSpaceLens(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up", "k":
 		if m.slCursor > 0 {
 			m.slCursor--
+			m.slEnsureCursorVisible()
 		}
 	case "down", "j":
 		max := len(m.slNodes) - 1
-		if max > 29 {
-			max = 29
-		}
 		if m.slCursor < max {
 			m.slCursor++
+			m.slEnsureCursorVisible()
 		}
 	case "enter":
 		if m.slCursor < len(m.slNodes) && m.slNodes[m.slCursor].IsDir {
 			m.slPath = m.slNodes[m.slCursor].Path
 			m.slLoading = true
 			m.slCursor = 0
+			m.slScrollOffset = 0
 			cancel, ch, cmd := startSpaceLens(m.slPath)
 			m.slCancel = cancel
 			m.slProgressCh = ch
 			return m, tea.Batch(cmd, m.spinner.Tick)
+		}
+	case "d":
+		if m.slCursor < len(m.slNodes) {
+			node := m.slNodes[m.slCursor]
+			m.slDeleteTarget = &node
+			m.currentView = viewSpaceLensConfirm
 		}
 	case "h":
 		// Go up one directory
@@ -427,6 +602,7 @@ func (m Model) updateSpaceLens(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.slPath = m.slPath[:idx]
 			m.slLoading = true
 			m.slCursor = 0
+			m.slScrollOffset = 0
 			cancel, ch, cmd := startSpaceLens(m.slPath)
 			m.slCancel = cancel
 			m.slProgressCh = ch
@@ -439,6 +615,39 @@ func (m Model) updateSpaceLens(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *Model) slEnsureCursorVisible() {
+	visible := m.visibleItemCount()
+	if m.slCursor < m.slScrollOffset {
+		m.slScrollOffset = m.slCursor
+	}
+	if m.slCursor >= m.slScrollOffset+visible {
+		m.slScrollOffset = m.slCursor - visible + 1
+	}
+}
+
+func (m Model) updateSpaceLensConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y":
+		if m.slDeleteTarget != nil {
+			_ = trash.MoveToTrash(m.slDeleteTarget.Path)
+			m.slDeleteTarget = nil
+			m.slLoading = true
+			m.slCursor = 0
+			m.slScrollOffset = 0
+			m.currentView = viewSpaceLens
+			cancel, ch, cmd := startSpaceLens(m.slPath)
+			m.slCancel = cancel
+			m.slProgressCh = ch
+			return m, tea.Batch(cmd, m.spinner.Tick)
+		}
+		m.currentView = viewSpaceLens
+	case "n", "esc":
+		m.slDeleteTarget = nil
+		m.currentView = viewSpaceLens
+	}
+	return m, nil
+}
+
 func (m Model) updateMaintainResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "backspace", "enter":
@@ -446,6 +655,343 @@ func (m Model) updateMaintainResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor = 2
 	}
 	return m, nil
+}
+
+func startDupesScan() (context.CancelFunc, chan string, tea.Cmd) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ch := make(chan string, 1)
+
+	home := utils.HomeDir()
+	dirs := []string{
+		filepath.Join(home, "Downloads"),
+		filepath.Join(home, "Desktop"),
+		filepath.Join(home, "Documents"),
+	}
+
+	scanCmd := func() tea.Msg {
+		groups, _ := dupes.FindWithProgress(ctx, dirs, 0, func(path string) {
+			select {
+			case ch <- path:
+			default:
+			}
+		})
+		close(ch)
+		return dupesDoneMsg{groups: groups}
+	}
+
+	return cancel, ch, tea.Batch(scanCmd, listenDupesProgress(ch))
+}
+
+func listenDupesProgress(ch chan string) tea.Cmd {
+	return func() tea.Msg {
+		path, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return dupesProgressMsg{path: path}
+	}
+}
+
+// dupesFileList returns a flat list of (groupIdx, fileIdx, path, size, isKeep) for display.
+type dupesEntry struct {
+	groupIdx int
+	fileIdx  int
+	path     string
+	size     int64
+	hash     string
+	isKeep   bool
+	isHeader bool
+}
+
+func (m Model) dupesFlatList() []dupesEntry {
+	var entries []dupesEntry
+	for gi, g := range m.dupGroups {
+		wasted := g.Size * int64(len(g.Files)-1)
+		entries = append(entries, dupesEntry{
+			groupIdx: gi,
+			isHeader: true,
+			size:     wasted,
+			hash:     g.Hash,
+		})
+		for fi, f := range g.Files {
+			entries = append(entries, dupesEntry{
+				groupIdx: gi,
+				fileIdx:  fi,
+				path:     f,
+				size:     g.Size,
+				isKeep:   fi == 0,
+			})
+		}
+	}
+	return entries
+}
+
+func (m Model) updateDupes(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.dupLoading {
+		if msg.String() == "esc" || msg.String() == "backspace" {
+			if m.dupCancel != nil {
+				m.dupCancel()
+			}
+			m.dupLoading = false
+			m.dupScanning = ""
+			m.dupCancel = nil
+			m.dupProgressCh = nil
+			m.currentView = viewMenu
+			m.cursor = 3
+		}
+		return m, nil
+	}
+
+	entries := m.dupesFlatList()
+
+	switch msg.String() {
+	case "up", "k":
+		if m.dupCursor > 0 {
+			m.dupCursor--
+			// Skip headers.
+			if m.dupCursor >= 0 && m.dupCursor < len(entries) && entries[m.dupCursor].isHeader {
+				if m.dupCursor > 0 {
+					m.dupCursor--
+				}
+			}
+			m.dupEnsureCursorVisible(entries)
+		}
+	case "down", "j":
+		if m.dupCursor < len(entries)-1 {
+			m.dupCursor++
+			// Skip headers.
+			if m.dupCursor < len(entries) && entries[m.dupCursor].isHeader {
+				if m.dupCursor < len(entries)-1 {
+					m.dupCursor++
+				}
+			}
+			m.dupEnsureCursorVisible(entries)
+		}
+	case " ":
+		if m.dupCursor < len(entries) {
+			e := entries[m.dupCursor]
+			if !e.isHeader && !e.isKeep {
+				key := fmt.Sprintf("%d:%d", e.groupIdx, e.fileIdx)
+				if m.dupSelected[key] {
+					delete(m.dupSelected, key)
+				} else {
+					m.dupSelected[key] = true
+				}
+			}
+		}
+	case "d", "enter":
+		if len(m.dupSelected) > 0 {
+			m.currentView = viewDupesConfirm
+		}
+	case "esc", "backspace":
+		m.currentView = viewMenu
+		m.cursor = 3
+	}
+	return m, nil
+}
+
+func (m *Model) dupEnsureCursorVisible(entries []dupesEntry) {
+	visible := m.visibleItemCount()
+	if m.dupCursor < m.dupScrollOffset {
+		m.dupScrollOffset = m.dupCursor
+	}
+	if m.dupCursor >= m.dupScrollOffset+visible {
+		m.dupScrollOffset = m.dupCursor - visible + 1
+	}
+}
+
+func (m Model) updateDupesConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y":
+		return m, m.doDupesClean()
+	case "n", "esc", "backspace":
+		m.currentView = viewDupes
+	}
+	return m, nil
+}
+
+func (m Model) updateDupesResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "r":
+		// Re-scan.
+		m.dupLoading = true
+		m.dupCursor = 0
+		m.dupScrollOffset = 0
+		m.currentView = viewDupes
+		cancel, ch, cmd := startDupesScan()
+		m.dupCancel = cancel
+		m.dupProgressCh = ch
+		return m, tea.Batch(cmd, m.spinner.Tick)
+	case "esc", "backspace", "enter":
+		m.currentView = viewMenu
+		m.cursor = 3
+	}
+	return m, nil
+}
+
+func (m Model) doDupesClean() tea.Cmd {
+	return func() tea.Msg {
+		var deleted, failed int
+		var freed int64
+		for gi, g := range m.dupGroups {
+			for fi, f := range g.Files {
+				key := fmt.Sprintf("%d:%d", gi, fi)
+				if !m.dupSelected[key] {
+					continue
+				}
+				if err := trash.MoveToTrash(f); err != nil {
+					failed++
+				} else {
+					deleted++
+					freed += g.Size
+				}
+			}
+		}
+		return dupesCleanDoneMsg{deleted: deleted, failed: failed, freed: freed}
+	}
+}
+
+func (m Model) updateUninstallInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.uiLoading {
+		if msg.String() == "esc" || msg.String() == "backspace" {
+			m.uiLoading = false
+			m.currentView = viewMenu
+			m.cursor = 4
+		}
+		return m, nil
+	}
+
+	switch msg.String() {
+	case "up", "k":
+		if m.uiAppCursor > 0 {
+			m.uiAppCursor--
+			m.uiAppEnsureCursorVisible()
+		}
+	case "down", "j":
+		if m.uiAppCursor < len(m.uiApps)-1 {
+			m.uiAppCursor++
+			m.uiAppEnsureCursorVisible()
+		}
+	case " ":
+		if m.uiAppSelected[m.uiAppCursor] {
+			delete(m.uiAppSelected, m.uiAppCursor)
+		} else {
+			m.uiAppSelected[m.uiAppCursor] = true
+		}
+	case "enter", "d":
+		if len(m.uiAppSelected) > 0 {
+			m.uiLoading = true
+			return m, tea.Batch(m.doUninstallScan(), m.spinner.Tick)
+		}
+	case "esc", "backspace":
+		m.currentView = viewMenu
+		m.cursor = 4
+	}
+	return m, nil
+}
+
+func (m *Model) uiAppEnsureCursorVisible() {
+	visible := m.visibleItemCount()
+	if m.uiAppCursor < m.uiAppScrollOffset {
+		m.uiAppScrollOffset = m.uiAppCursor
+	}
+	if m.uiAppCursor >= m.uiAppScrollOffset+visible {
+		m.uiAppScrollOffset = m.uiAppCursor - visible + 1
+	}
+}
+
+func (m Model) doUninstallScan() tea.Cmd {
+	// Collect selected app names.
+	var names []string
+	for i, name := range m.uiApps {
+		if m.uiAppSelected[i] {
+			names = append(names, name)
+		}
+	}
+	return func() tea.Msg {
+		s := scanner.NewAppScanner("", "")
+		var all []scanner.Target
+		for _, name := range names {
+			targets, _ := s.FindRelatedFiles(context.Background(), name)
+			all = append(all, targets...)
+		}
+		return uninstallScanDoneMsg{targets: all}
+	}
+}
+
+func (m Model) updateUninstallResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.uiCursor > 0 {
+			m.uiCursor--
+			m.uiEnsureCursorVisible()
+		}
+	case "down", "j":
+		if m.uiCursor < len(m.uiTargets)-1 {
+			m.uiCursor++
+			m.uiEnsureCursorVisible()
+		}
+	case " ":
+		if m.uiSelected[m.uiCursor] {
+			delete(m.uiSelected, m.uiCursor)
+		} else {
+			m.uiSelected[m.uiCursor] = true
+		}
+	case "a":
+		if len(m.uiSelected) == len(m.uiTargets) {
+			m.uiSelected = make(map[int]bool)
+		} else {
+			for i := range m.uiTargets {
+				m.uiSelected[i] = true
+			}
+		}
+	case "d", "enter":
+		if len(m.uiSelected) > 0 {
+			m.currentView = viewUninstallConfirm
+		}
+	case "esc", "backspace":
+		m.currentView = viewUninstallInput
+	}
+	return m, nil
+}
+
+func (m *Model) uiEnsureCursorVisible() {
+	visible := m.visibleItemCount()
+	if m.uiCursor < m.uiScrollOffset2 {
+		m.uiScrollOffset2 = m.uiCursor
+	}
+	if m.uiCursor >= m.uiScrollOffset2+visible {
+		m.uiScrollOffset2 = m.uiCursor - visible + 1
+	}
+}
+
+func (m Model) updateUninstallConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y":
+		return m, m.doUninstallClean()
+	case "n", "esc", "backspace":
+		m.currentView = viewUninstallResults
+	}
+	return m, nil
+}
+
+func (m Model) doUninstallClean() tea.Cmd {
+	return func() tea.Msg {
+		var deleted, failed int
+		var freed int64
+		for i, t := range m.uiTargets {
+			if !m.uiSelected[i] {
+				continue
+			}
+			if err := trash.MoveToTrash(t.Path); err != nil {
+				failed++
+			} else {
+				deleted++
+				freed += t.Size
+			}
+		}
+		return uninstallCleanDoneMsg{deleted: deleted, failed: failed, freed: freed}
+	}
 }
 
 func (m Model) doClean() tea.Cmd {
@@ -491,10 +1037,24 @@ func (m Model) View() string {
 		return m.viewResult()
 	case viewSpaceLens:
 		return m.viewSpaceLens()
+	case viewSpaceLensConfirm:
+		return m.viewSpaceLensConfirm()
 	case viewMaintain:
 		return m.viewMaintain()
 	case viewMaintainResult:
 		return m.viewMaintainResult()
+	case viewDupes:
+		return m.viewDupes()
+	case viewDupesConfirm:
+		return m.viewDupesConfirm()
+	case viewDupesResult:
+		return m.viewDupesResult()
+	case viewUninstallInput:
+		return m.viewUninstallInput()
+	case viewUninstallResults:
+		return m.viewUninstallResults()
+	case viewUninstallConfirm:
+		return m.viewUninstallConfirm()
 	default:
 		return m.viewMenu()
 	}
@@ -671,9 +1231,9 @@ func (m Model) viewResult() string {
 
 func (m Model) viewSpaceLens() string {
 	s := titleStyle.Render("macbroom -- Space Lens") + "\n"
-	s += dimStyle.Render(m.slPath) + "\n\n"
 
 	if m.slLoading {
+		s += dimStyle.Render(m.slPath) + "\n\n"
 		s += m.spinner.View() + " Analyzing...\n"
 		if m.slScanning != "" {
 			name := m.slScanning
@@ -686,18 +1246,29 @@ func (m Model) viewSpaceLens() string {
 		return s
 	}
 
+	// Calculate total size for header and percentages.
+	var totalSize int64
+	for _, node := range m.slNodes {
+		totalSize += node.Size
+	}
+
+	s += dimStyle.Render(fmt.Sprintf("%s (%s)", m.slPath, utils.FormatSize(totalSize))) + "\n\n"
+
 	if len(m.slNodes) == 0 {
 		s += "Empty directory.\n"
 		return s + helpStyle.Render("\nesc back | q quit")
 	}
 
 	maxSize := m.slNodes[0].Size
-	visible := m.slNodes
-	if len(visible) > 30 {
-		visible = visible[:30]
+	visible := m.visibleItemCount()
+	total := len(m.slNodes)
+	end := m.slScrollOffset + visible
+	if end > total {
+		end = total
 	}
 
-	for i, node := range visible {
+	for i := m.slScrollOffset; i < end; i++ {
+		node := m.slNodes[i]
 		cursor := "  "
 		if i == m.slCursor {
 			cursor = "> "
@@ -713,9 +1284,14 @@ func (m Model) viewSpaceLens() string {
 			name = name[:27] + "..."
 		}
 
+		pct := 0
+		if totalSize > 0 {
+			pct = int(float64(node.Size) / float64(totalSize) * 100)
+		}
+
 		bar := renderBar(node.Size, maxSize, 25)
-		line := fmt.Sprintf("%s%s %-30s %10s %s",
-			cursor, icon, name, utils.FormatSize(node.Size), bar)
+		line := fmt.Sprintf("%s%s %-30s %10s  %3d%%  %s",
+			cursor, icon, name, utils.FormatSize(node.Size), pct, bar)
 
 		if i == m.slCursor {
 			s += selectedStyle.Render(line) + "\n"
@@ -724,11 +1300,322 @@ func (m Model) viewSpaceLens() string {
 		}
 	}
 
-	if len(m.slNodes) > 30 {
-		s += dimStyle.Render(fmt.Sprintf("\n  ... and %d more items", len(m.slNodes)-30)) + "\n"
+	// Scroll indicator
+	if total > visible {
+		s += dimStyle.Render(fmt.Sprintf("  [%d-%d of %d]", m.slScrollOffset+1, end, total)) + "\n"
 	}
 
-	s += helpStyle.Render("\nj/k navigate | enter drill in | h go up | esc back | q quit")
+	s += helpStyle.Render("\nj/k navigate | enter drill in | d delete | h go up | esc back | q quit")
+	return s
+}
+
+func (m Model) viewSpaceLensConfirm() string {
+	if m.slDeleteTarget == nil {
+		return "Nothing to confirm"
+	}
+
+	dangerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("196")).
+		Background(lipgloss.Color("52")).
+		Padding(0, 1)
+
+	s := dangerStyle.Render(" DELETE ITEM ") + "\n\n"
+	s += fmt.Sprintf("  Delete %s (%s)? (y/n)\n", m.slDeleteTarget.Name, utils.FormatSize(m.slDeleteTarget.Size))
+	s += dimStyle.Render(fmt.Sprintf("\n  Path: %s", m.slDeleteTarget.Path)) + "\n"
+	s += helpStyle.Render("\n  y confirm | n cancel | q quit")
+	return s
+}
+
+func (m Model) viewDupes() string {
+	s := titleStyle.Render("macbroom -- Duplicates") + "\n"
+
+	if m.dupLoading {
+		s += "\n" + m.spinner.View() + " Scanning for duplicates...\n"
+		if m.dupScanning != "" {
+			name := m.dupScanning
+			if len(name) > 50 {
+				name = "..." + name[len(name)-47:]
+			}
+			s += dimStyle.Render("  "+name) + "\n"
+		}
+		s += helpStyle.Render("\nesc cancel")
+		return s
+	}
+
+	if len(m.dupGroups) == 0 {
+		s += "\nNo duplicates found!\n"
+		return s + helpStyle.Render("\nesc back | q quit")
+	}
+
+	var totalWasted int64
+	var totalCopies int
+	for _, g := range m.dupGroups {
+		totalWasted += g.Size * int64(len(g.Files)-1)
+		totalCopies += len(g.Files) - 1
+	}
+	s += dimStyle.Render(fmt.Sprintf("%d groups, %d copies, %s wasted",
+		len(m.dupGroups), totalCopies, utils.FormatSize(totalWasted))) + "\n\n"
+
+	entries := m.dupesFlatList()
+	visible := m.visibleItemCount()
+	total := len(entries)
+	end := m.dupScrollOffset + visible
+	if end > total {
+		end = total
+	}
+
+	for i := m.dupScrollOffset; i < end; i++ {
+		e := entries[i]
+		if e.isHeader {
+			hashShort := e.hash
+			if len(hashShort) > 12 {
+				hashShort = hashShort[:12]
+			}
+			s += dimStyle.Render(fmt.Sprintf("  --- Group %d: %s wasted (hash: %s...) ---",
+				e.groupIdx+1, utils.FormatSize(e.size), hashShort)) + "\n"
+			continue
+		}
+
+		cursor := "  "
+		if i == m.dupCursor {
+			cursor = "> "
+		}
+
+		label := "[keep]"
+		check := ""
+		if !e.isKeep {
+			key := fmt.Sprintf("%d:%d", e.groupIdx, e.fileIdx)
+			if m.dupSelected[key] {
+				check = "[x] "
+			} else {
+				check = "[ ] "
+			}
+			label = ""
+		} else {
+			label = "[keep] "
+		}
+
+		path := e.path
+		if len(path) > 45 {
+			path = "..." + path[len(path)-42:]
+		}
+
+		line := fmt.Sprintf("%s%s%s%s (%s)", cursor, label, check, path, utils.FormatSize(e.size))
+
+		if i == m.dupCursor {
+			s += selectedStyle.Render(line) + "\n"
+		} else {
+			s += line + "\n"
+		}
+	}
+
+	if total > visible {
+		s += dimStyle.Render(fmt.Sprintf("  [%d-%d of %d]", m.dupScrollOffset+1, end, total)) + "\n"
+	}
+
+	var selectedSize int64
+	var selectedCount int
+	for key := range m.dupSelected {
+		selectedCount++
+		var gi, fi int
+		fmt.Sscanf(key, "%d:%d", &gi, &fi)
+		if gi < len(m.dupGroups) {
+			selectedSize += m.dupGroups[gi].Size
+		}
+	}
+
+	s += "\n" + statusBarStyle.Render(fmt.Sprintf(" Selected: %d copies (%s) ", selectedCount, utils.FormatSize(selectedSize)))
+	s += helpStyle.Render("\n\nj/k navigate | space toggle | d delete selected | esc back | q quit")
+	return s
+}
+
+func (m Model) viewDupesConfirm() string {
+	dangerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("196")).
+		Background(lipgloss.Color("52")).
+		Padding(0, 1)
+
+	s := dangerStyle.Render(" CONFIRM DUPLICATE DELETION ") + "\n\n"
+
+	var selectedSize int64
+	var selectedCount int
+	for key := range m.dupSelected {
+		selectedCount++
+		var gi, fi int
+		fmt.Sscanf(key, "%d:%d", &gi, &fi)
+		if gi < len(m.dupGroups) {
+			selectedSize += m.dupGroups[gi].Size
+		}
+	}
+
+	s += fmt.Sprintf("  %d duplicate copies | %s | will be moved to Trash (recoverable)\n",
+		selectedCount, utils.FormatSize(selectedSize))
+	s += dimStyle.Render("\n  One copy per group will be kept.") + "\n"
+	s += helpStyle.Render("\n  y confirm | n cancel | q quit")
+	return s
+}
+
+func (m Model) viewDupesResult() string {
+	s := titleStyle.Render("macbroom -- Duplicates Cleaned") + "\n\n"
+
+	successStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("82"))
+	failStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
+
+	s += successStyle.Render(fmt.Sprintf("  Deleted: %d copies (%s freed)", m.dupDeleted, utils.FormatSize(m.dupFreed))) + "\n"
+	if m.dupFailed > 0 {
+		s += failStyle.Render(fmt.Sprintf("  Failed:  %d items", m.dupFailed)) + "\n"
+	}
+
+	s += helpStyle.Render("\n  r re-scan | esc menu | q quit")
+	return s
+}
+
+func (m Model) viewUninstallInput() string {
+	s := titleStyle.Render("macbroom -- Uninstall") + "\n\n"
+
+	if m.uiLoading {
+		s += m.spinner.View() + " Searching for app files...\n"
+		s += helpStyle.Render("\nesc cancel")
+		return s
+	}
+
+	if len(m.uiApps) == 0 {
+		s += "  No applications found.\n"
+		return s + helpStyle.Render("\nesc back | q quit")
+	}
+
+	selectedCount := len(m.uiAppSelected)
+	s += dimStyle.Render(fmt.Sprintf("  %d apps installed, %d selected", len(m.uiApps), selectedCount)) + "\n\n"
+
+	visible := m.visibleItemCount()
+	total := len(m.uiApps)
+	end := m.uiAppScrollOffset + visible
+	if end > total {
+		end = total
+	}
+
+	for i := m.uiAppScrollOffset; i < end; i++ {
+		cursor := "  "
+		if i == m.uiAppCursor {
+			cursor = "> "
+		}
+
+		check := "[ ]"
+		if m.uiAppSelected[i] {
+			check = "[x]"
+		}
+
+		line := fmt.Sprintf("%s%s %s", cursor, check, m.uiApps[i])
+
+		if i == m.uiAppCursor {
+			s += selectedStyle.Render(line) + "\n"
+		} else {
+			s += line + "\n"
+		}
+	}
+
+	if total > visible {
+		s += dimStyle.Render(fmt.Sprintf("  [%d-%d of %d]", m.uiAppScrollOffset+1, end, total)) + "\n"
+	}
+
+	s += helpStyle.Render("\n\nj/k navigate | space select | enter scan selected | esc back | q quit")
+	return s
+}
+
+func (m Model) viewUninstallResults() string {
+	s := titleStyle.Render("macbroom -- Uninstall") + "\n\n"
+
+	if len(m.uiTargets) == 0 {
+		s += "  No related files found for the selected apps.\n"
+		return s + helpStyle.Render("\nesc back | q quit")
+	}
+
+	// Build a summary of selected app names.
+	var appNames []string
+	for i, name := range m.uiApps {
+		if m.uiAppSelected[i] {
+			appNames = append(appNames, name)
+		}
+	}
+	summary := "selected apps"
+	if len(appNames) <= 3 {
+		summary = fmt.Sprintf("%s", joinNames(appNames))
+	} else {
+		summary = fmt.Sprintf("%s and %d more", joinNames(appNames[:2]), len(appNames)-2)
+	}
+
+	s += dimStyle.Render(fmt.Sprintf("  Found %d items for %s", len(m.uiTargets), summary)) + "\n\n"
+
+	visible := m.visibleItemCount()
+	total := len(m.uiTargets)
+	end := m.uiScrollOffset2 + visible
+	if end > total {
+		end = total
+	}
+
+	for i := m.uiScrollOffset2; i < end; i++ {
+		t := m.uiTargets[i]
+		cursor := "  "
+		if i == m.uiCursor {
+			cursor = "> "
+		}
+
+		check := "[ ]"
+		if m.uiSelected[i] {
+			check = "[x]"
+		}
+
+		line := fmt.Sprintf("%s%s %-35s %10s",
+			cursor, check, truncPath(t.Path, 35), utils.FormatSize(t.Size))
+
+		if i == m.uiCursor {
+			s += selectedStyle.Render(line) + "\n"
+		} else {
+			s += line + "\n"
+		}
+	}
+
+	if total > visible {
+		s += dimStyle.Render(fmt.Sprintf("  [%d-%d of %d]", m.uiScrollOffset2+1, end, total)) + "\n"
+	}
+
+	var selectedSize int64
+	var selectedFileCount int
+	for i, t := range m.uiTargets {
+		if m.uiSelected[i] {
+			selectedSize += t.Size
+			selectedFileCount++
+		}
+	}
+
+	s += "\n" + statusBarStyle.Render(fmt.Sprintf(" Selected: %d items (%s) ", selectedFileCount, utils.FormatSize(selectedSize)))
+	s += helpStyle.Render("\n\nj/k navigate | space toggle | a toggle all | d delete | esc back | q quit")
+	return s
+}
+
+func (m Model) viewUninstallConfirm() string {
+	dangerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("196")).
+		Background(lipgloss.Color("52")).
+		Padding(0, 1)
+
+	s := dangerStyle.Render(" CONFIRM UNINSTALL ") + "\n\n"
+
+	var selectedSize int64
+	var selectedCount int
+	for i, t := range m.uiTargets {
+		if m.uiSelected[i] {
+			selectedSize += t.Size
+			selectedCount++
+			s += fmt.Sprintf("  %s (%s)\n", truncPath(t.Path, 50), utils.FormatSize(t.Size))
+		}
+	}
+
+	s += fmt.Sprintf("\n  %d items | %s | will be moved to Trash (recoverable)\n", selectedCount, utils.FormatSize(selectedSize))
+	s += helpStyle.Render("\n  y confirm | n cancel | q quit")
 	return s
 }
 
@@ -784,4 +1671,24 @@ func lastSlash(s string) int {
 		}
 	}
 	return -1
+}
+
+func joinNames(names []string) string {
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0]
+	case 2:
+		return names[0] + " and " + names[1]
+	default:
+		s := ""
+		for i, n := range names {
+			if i > 0 {
+				s += ", "
+			}
+			s += n
+		}
+		return s
+	}
 }
