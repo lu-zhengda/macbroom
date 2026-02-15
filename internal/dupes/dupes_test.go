@@ -171,6 +171,33 @@ func TestSkipsGitDirs(t *testing.T) {
 	}
 }
 
+func TestSkipsHiddenFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	content := []byte("hidden file content that is duplicated")
+
+	// Two hidden files with identical content.
+	if err := os.WriteFile(filepath.Join(dir, ".localized"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, ".localized"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	groups, err := dupes.Find(context.Background(), []string{dir}, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(groups) != 0 {
+		t.Fatalf("expected 0 groups (hidden files should be skipped), got %d", len(groups))
+	}
+}
+
 func TestSkipsGitRepoRoots(t *testing.T) {
 	dir := t.TempDir()
 

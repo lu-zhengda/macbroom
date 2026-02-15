@@ -106,6 +106,11 @@ func groupBySize(ctx context.Context, dirs []string, minSize int64, onProgress P
 				return nil
 			}
 
+			// Skip hidden files (dotfiles).
+			if d.Name()[0] == '.' {
+				return nil
+			}
+
 			// Skip symlinks.
 			if d.Type()&os.ModeSymlink != 0 {
 				return nil
