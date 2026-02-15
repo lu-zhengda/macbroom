@@ -141,6 +141,36 @@ func TestFindWithProgress(t *testing.T) {
 	}
 }
 
+func TestSkipsGitDirs(t *testing.T) {
+	dir := t.TempDir()
+
+	content := []byte("identical content in git and outside")
+
+	// File outside .git.
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// File inside .git — should be ignored.
+	gitDir := filepath.Join(dir, ".git", "objects")
+	if err := os.MkdirAll(gitDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "abc123"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	groups, err := dupes.Find(context.Background(), []string{dir}, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Only one file visible (a.txt), so no duplicates.
+	if len(groups) != 0 {
+		t.Fatalf("expected 0 groups (git files should be skipped), got %d", len(groups))
+	}
+}
+
 func TestMultipleDirs(t *testing.T) {
 	dir1 := t.TempDir()
 	dir2 := t.TempDir()

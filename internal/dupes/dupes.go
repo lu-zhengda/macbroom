@@ -95,6 +95,10 @@ func groupBySize(ctx context.Context, dirs []string, minSize int64, onProgress P
 			}
 
 			if d.IsDir() {
+				// Skip .git directories entirely.
+				if d.Name() == ".git" {
+					return fs.SkipDir
+				}
 				return nil
 			}
 

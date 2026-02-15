@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/lu-zhengda/macbroom/internal/dupes"
@@ -145,15 +144,18 @@ type Model struct {
 	dupFreed        int64
 
 	// Uninstall state
-	uiTextInput    textinput.Model
-	uiTargets      []scanner.Target
-	uiLoading      bool
-	uiCursor       int
-	uiScrollOffset int
-	uiSelected     map[int]bool
-	uiDeleted      int
-	uiFailed       int
-	uiFreed        int64
+	uiApps           []string       // installed app names
+	uiAppSelected   map[int]bool   // multi-select for apps
+	uiAppCursor     int
+	uiAppScrollOffset int
+	uiTargets        []scanner.Target
+	uiLoading        bool
+	uiCursor         int
+	uiScrollOffset2  int            // scroll offset for results view
+	uiSelected       map[int]bool   // selected files to delete
+	uiDeleted        int
+	uiFailed         int
+	uiFreed          int64
 
 	spinner spinner.Model
 
@@ -166,18 +168,13 @@ func New(e *engine.Engine) Model {
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("170"))
 
-	ti := textinput.New()
-	ti.Placeholder = "Enter app name..."
-	ti.CharLimit = 100
-	ti.Width = 40
-
 	return Model{
-		engine:      e,
-		selected:    make(map[int]bool),
-		spinner:     sp,
-		slPath:      "/",
-		uiTextInput: ti,
-		uiSelected:  make(map[int]bool),
+		engine:         e,
+		selected:       make(map[int]bool),
+		spinner:        sp,
+		slPath:         "/",
+		uiAppSelected:  make(map[int]bool),
+		uiSelected:     make(map[int]bool),
 	}
 }
 
@@ -327,7 +324,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.uiLoading = false
 		m.uiTargets = msg.targets
 		m.uiCursor = 0
-		m.uiScrollOffset = 0
+		m.uiScrollOffset2 = 0
 		m.uiSelected = make(map[int]bool)
 		for i := range msg.targets {
 			m.uiSelected[i] = true
@@ -347,11 +344,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		// Global quit (skip "q" when user is typing in text input).
-		if msg.String() == "ctrl+c" {
-			return m, tea.Quit
-		}
-		if msg.String() == "q" && !(m.currentView == viewUninstallInput && !m.uiLoading) {
+		// Global quit.
+		if msg.String() == "ctrl+c" || msg.String() == "q" {
 			return m, tea.Quit
 		}
 
@@ -386,14 +380,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateUninstallResults(msg)
 		case viewUninstallConfirm:
 			return m.updateUninstallConfirm(msg)
-		}
-
-	default:
-		// Forward cursor blink and other messages to the text input when active.
-		if m.currentView == viewUninstallInput && !m.uiLoading {
-			var cmd tea.Cmd
-			m.uiTextInput, cmd = m.uiTextInput.Update(msg)
-			return m, cmd
 		}
 	}
 
@@ -439,12 +425,14 @@ func (m Model) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.dupProgressCh = ch
 			return m, tea.Batch(cmd, m.spinner.Tick)
 		case 4: // Uninstall
-			m.uiTextInput.Reset()
-			m.uiTextInput.Focus()
+			s := scanner.NewAppScanner("", "")
+			m.uiApps = s.ListApps()
+			m.uiAppSelected = make(map[int]bool)
+			m.uiAppCursor = 0
+			m.uiAppScrollOffset = 0
 			m.uiTargets = nil
 			m.uiSelected = make(map[int]bool)
 			m.currentView = viewUninstallInput
-			return m, m.uiTextInput.Cursor.BlinkCmd()
 		}
 	}
 	return m, nil
@@ -864,30 +852,70 @@ func (m Model) doDupesClean() tea.Cmd {
 }
 
 func (m Model) updateUninstallInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "enter":
-		appName := m.uiTextInput.Value()
-		if appName == "" {
-			return m, nil
+	if m.uiLoading {
+		if msg.String() == "esc" || msg.String() == "backspace" {
+			m.uiLoading = false
+			m.currentView = viewMenu
+			m.cursor = 4
 		}
-		m.uiLoading = true
-		return m, tea.Batch(m.doUninstallScan(appName), m.spinner.Tick)
-	case "esc":
-		m.currentView = viewMenu
-		m.cursor = 4
 		return m, nil
 	}
 
-	var cmd tea.Cmd
-	m.uiTextInput, cmd = m.uiTextInput.Update(msg)
-	return m, cmd
+	switch msg.String() {
+	case "up", "k":
+		if m.uiAppCursor > 0 {
+			m.uiAppCursor--
+			m.uiAppEnsureCursorVisible()
+		}
+	case "down", "j":
+		if m.uiAppCursor < len(m.uiApps)-1 {
+			m.uiAppCursor++
+			m.uiAppEnsureCursorVisible()
+		}
+	case " ":
+		if m.uiAppSelected[m.uiAppCursor] {
+			delete(m.uiAppSelected, m.uiAppCursor)
+		} else {
+			m.uiAppSelected[m.uiAppCursor] = true
+		}
+	case "enter", "d":
+		if len(m.uiAppSelected) > 0 {
+			m.uiLoading = true
+			return m, tea.Batch(m.doUninstallScan(), m.spinner.Tick)
+		}
+	case "esc", "backspace":
+		m.currentView = viewMenu
+		m.cursor = 4
+	}
+	return m, nil
 }
 
-func (m Model) doUninstallScan(appName string) tea.Cmd {
+func (m *Model) uiAppEnsureCursorVisible() {
+	visible := m.visibleItemCount()
+	if m.uiAppCursor < m.uiAppScrollOffset {
+		m.uiAppScrollOffset = m.uiAppCursor
+	}
+	if m.uiAppCursor >= m.uiAppScrollOffset+visible {
+		m.uiAppScrollOffset = m.uiAppCursor - visible + 1
+	}
+}
+
+func (m Model) doUninstallScan() tea.Cmd {
+	// Collect selected app names.
+	var names []string
+	for i, name := range m.uiApps {
+		if m.uiAppSelected[i] {
+			names = append(names, name)
+		}
+	}
 	return func() tea.Msg {
 		s := scanner.NewAppScanner("", "")
-		targets, _ := s.FindRelatedFiles(context.Background(), appName)
-		return uninstallScanDoneMsg{targets: targets}
+		var all []scanner.Target
+		for _, name := range names {
+			targets, _ := s.FindRelatedFiles(context.Background(), name)
+			all = append(all, targets...)
+		}
+		return uninstallScanDoneMsg{targets: all}
 	}
 }
 
@@ -922,20 +950,18 @@ func (m Model) updateUninstallResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.currentView = viewUninstallConfirm
 		}
 	case "esc", "backspace":
-		m.uiTextInput.Focus()
 		m.currentView = viewUninstallInput
-		return m, m.uiTextInput.Cursor.BlinkCmd()
 	}
 	return m, nil
 }
 
 func (m *Model) uiEnsureCursorVisible() {
 	visible := m.visibleItemCount()
-	if m.uiCursor < m.uiScrollOffset {
-		m.uiScrollOffset = m.uiCursor
+	if m.uiCursor < m.uiScrollOffset2 {
+		m.uiScrollOffset2 = m.uiCursor
 	}
-	if m.uiCursor >= m.uiScrollOffset+visible {
-		m.uiScrollOffset = m.uiCursor - visible + 1
+	if m.uiCursor >= m.uiScrollOffset2+visible {
+		m.uiScrollOffset2 = m.uiCursor - visible + 1
 	}
 }
 
@@ -1451,12 +1477,50 @@ func (m Model) viewUninstallInput() string {
 
 	if m.uiLoading {
 		s += m.spinner.View() + " Searching for app files...\n"
+		s += helpStyle.Render("\nesc cancel")
 		return s
 	}
 
-	s += "  Enter the name of the application to uninstall:\n\n"
-	s += "  " + m.uiTextInput.View() + "\n"
-	s += helpStyle.Render("\n\nenter search | esc back | q quit")
+	if len(m.uiApps) == 0 {
+		s += "  No applications found.\n"
+		return s + helpStyle.Render("\nesc back | q quit")
+	}
+
+	selectedCount := len(m.uiAppSelected)
+	s += dimStyle.Render(fmt.Sprintf("  %d apps installed, %d selected", len(m.uiApps), selectedCount)) + "\n\n"
+
+	visible := m.visibleItemCount()
+	total := len(m.uiApps)
+	end := m.uiAppScrollOffset + visible
+	if end > total {
+		end = total
+	}
+
+	for i := m.uiAppScrollOffset; i < end; i++ {
+		cursor := "  "
+		if i == m.uiAppCursor {
+			cursor = "> "
+		}
+
+		check := "[ ]"
+		if m.uiAppSelected[i] {
+			check = "[x]"
+		}
+
+		line := fmt.Sprintf("%s%s %s", cursor, check, m.uiApps[i])
+
+		if i == m.uiAppCursor {
+			s += selectedStyle.Render(line) + "\n"
+		} else {
+			s += line + "\n"
+		}
+	}
+
+	if total > visible {
+		s += dimStyle.Render(fmt.Sprintf("  [%d-%d of %d]", m.uiAppScrollOffset+1, end, total)) + "\n"
+	}
+
+	s += helpStyle.Render("\n\nj/k navigate | space select | enter scan selected | esc back | q quit")
 	return s
 }
 
@@ -1464,20 +1528,34 @@ func (m Model) viewUninstallResults() string {
 	s := titleStyle.Render("macbroom -- Uninstall") + "\n\n"
 
 	if len(m.uiTargets) == 0 {
-		s += fmt.Sprintf("  No files found for %q.\n", m.uiTextInput.Value())
-		return s + helpStyle.Render("\nesc search again | q quit")
+		s += "  No related files found for the selected apps.\n"
+		return s + helpStyle.Render("\nesc back | q quit")
 	}
 
-	s += dimStyle.Render(fmt.Sprintf("  Found %d items for %q", len(m.uiTargets), m.uiTextInput.Value())) + "\n\n"
+	// Build a summary of selected app names.
+	var appNames []string
+	for i, name := range m.uiApps {
+		if m.uiAppSelected[i] {
+			appNames = append(appNames, name)
+		}
+	}
+	summary := "selected apps"
+	if len(appNames) <= 3 {
+		summary = fmt.Sprintf("%s", joinNames(appNames))
+	} else {
+		summary = fmt.Sprintf("%s and %d more", joinNames(appNames[:2]), len(appNames)-2)
+	}
+
+	s += dimStyle.Render(fmt.Sprintf("  Found %d items for %s", len(m.uiTargets), summary)) + "\n\n"
 
 	visible := m.visibleItemCount()
 	total := len(m.uiTargets)
-	end := m.uiScrollOffset + visible
+	end := m.uiScrollOffset2 + visible
 	if end > total {
 		end = total
 	}
 
-	for i := m.uiScrollOffset; i < end; i++ {
+	for i := m.uiScrollOffset2; i < end; i++ {
 		t := m.uiTargets[i]
 		cursor := "  "
 		if i == m.uiCursor {
@@ -1500,19 +1578,19 @@ func (m Model) viewUninstallResults() string {
 	}
 
 	if total > visible {
-		s += dimStyle.Render(fmt.Sprintf("  [%d-%d of %d]", m.uiScrollOffset+1, end, total)) + "\n"
+		s += dimStyle.Render(fmt.Sprintf("  [%d-%d of %d]", m.uiScrollOffset2+1, end, total)) + "\n"
 	}
 
 	var selectedSize int64
-	var selectedCount int
+	var selectedFileCount int
 	for i, t := range m.uiTargets {
 		if m.uiSelected[i] {
 			selectedSize += t.Size
-			selectedCount++
+			selectedFileCount++
 		}
 	}
 
-	s += "\n" + statusBarStyle.Render(fmt.Sprintf(" Selected: %d items (%s) ", selectedCount, utils.FormatSize(selectedSize)))
+	s += "\n" + statusBarStyle.Render(fmt.Sprintf(" Selected: %d items (%s) ", selectedFileCount, utils.FormatSize(selectedSize)))
 	s += helpStyle.Render("\n\nj/k navigate | space toggle | a toggle all | d delete | esc back | q quit")
 	return s
 }
@@ -1593,4 +1671,24 @@ func lastSlash(s string) int {
 		}
 	}
 	return -1
+}
+
+func joinNames(names []string) string {
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0]
+	case 2:
+		return names[0] + " and " + names[1]
+	default:
+		s := ""
+		for i, n := range names {
+			if i > 0 {
+				s += ", "
+			}
+			s += n
+		}
+		return s
+	}
 }
