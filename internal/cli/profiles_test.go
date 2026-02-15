@@ -6,12 +6,7 @@ import (
 )
 
 func TestSelectedCategories_DevProfile(t *testing.T) {
-	cats := selectedCategories(
-		false, false, false, false, false, false, false, false,
-		false, false, false, false,
-		false, false, false,
-		true, false, false,
-	)
+	cats := selectedCategories(CategoryFilter{Dev: true})
 	want := []string{"Go", "Gradle", "JetBrains", "Maven", "Node.js", "Python", "Ruby", "Rust"}
 	sort.Strings(cats)
 	if len(cats) != len(want) {
@@ -25,12 +20,7 @@ func TestSelectedCategories_DevProfile(t *testing.T) {
 }
 
 func TestSelectedCategories_CachesProfile(t *testing.T) {
-	cats := selectedCategories(
-		false, false, false, false, false, false, false, false,
-		false, false, false, false,
-		false, false, false,
-		false, true, false,
-	)
+	cats := selectedCategories(CategoryFilter{Caches: true})
 	want := []string{"Browser Cache", "Homebrew", "System Junk"}
 	sort.Strings(cats)
 	if len(cats) != len(want) {
@@ -44,24 +34,14 @@ func TestSelectedCategories_CachesProfile(t *testing.T) {
 }
 
 func TestSelectedCategories_AllProfile(t *testing.T) {
-	cats := selectedCategories(
-		false, false, false, false, false, false, false, false,
-		false, false, false, false,
-		false, false, false,
-		false, false, true,
-	)
+	cats := selectedCategories(CategoryFilter{All: true})
 	if cats != nil {
 		t.Errorf("--all should return nil (scan everything), got %v", cats)
 	}
 }
 
 func TestSelectedCategories_DevPlusDocker(t *testing.T) {
-	cats := selectedCategories(
-		false, false, false, false, true, false, false, false,
-		false, false, false, false,
-		false, false, false,
-		true, false, false,
-	)
+	cats := selectedCategories(CategoryFilter{Dev: true, Docker: true})
 	sort.Strings(cats)
 	want := []string{"Docker", "Go", "Gradle", "JetBrains", "Maven", "Node.js", "Python", "Ruby", "Rust"}
 	if len(cats) != len(want) {
@@ -75,12 +55,7 @@ func TestSelectedCategories_DevPlusDocker(t *testing.T) {
 }
 
 func TestSelectedCategories_DevAndCachesCombine(t *testing.T) {
-	cats := selectedCategories(
-		false, false, false, false, false, false, false, false,
-		false, false, false, false,
-		false, false, false,
-		true, true, false,
-	)
+	cats := selectedCategories(CategoryFilter{Dev: true, Caches: true})
 	sort.Strings(cats)
 	want := []string{"Browser Cache", "Go", "Gradle", "Homebrew", "JetBrains", "Maven", "Node.js", "Python", "Ruby", "Rust", "System Junk"}
 	if len(cats) != len(want) {
@@ -94,12 +69,7 @@ func TestSelectedCategories_DevAndCachesCombine(t *testing.T) {
 }
 
 func TestSelectedCategories_NoneSelected(t *testing.T) {
-	cats := selectedCategories(
-		false, false, false, false, false, false, false, false,
-		false, false, false, false,
-		false, false, false,
-		false, false, false,
-	)
+	cats := selectedCategories(CategoryFilter{})
 	if cats != nil {
 		t.Errorf("no flags should return nil, got %v", cats)
 	}

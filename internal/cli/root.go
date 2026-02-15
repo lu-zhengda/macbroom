@@ -106,6 +106,7 @@ func buildEngine() *engine.Engine {
 	}
 
 	e := engine.New()
+	home := utils.HomeDir()
 
 	if appConfig.Scanners.System {
 		e.Register(scanner.NewSystemScanner(""))
@@ -125,7 +126,6 @@ func buildEngine() *engine.Engine {
 		e.Register(scanner.NewDockerScanner())
 	}
 	if appConfig.Scanners.Node {
-		home := utils.HomeDir()
 		paths := expandPaths(appConfig.DevTools.SearchPaths)
 		minAge := config.ParseDuration(appConfig.DevTools.MinAge)
 		e.Register(scanner.NewNodeScanner(home, paths, minAge))
@@ -137,116 +137,110 @@ func buildEngine() *engine.Engine {
 		e.Register(scanner.NewSimulatorScanner(""))
 	}
 	if appConfig.Scanners.Python {
-		home := utils.HomeDir()
 		paths := expandPaths(appConfig.DevTools.SearchPaths)
 		minAge := config.ParseDuration(appConfig.DevTools.MinAge)
 		e.Register(scanner.NewPythonScanner(home, paths, minAge))
 	}
 	if appConfig.Scanners.Rust {
-		home := utils.HomeDir()
 		paths := expandPaths(appConfig.DevTools.SearchPaths)
 		minAge := config.ParseDuration(appConfig.DevTools.MinAge)
 		e.Register(scanner.NewRustScanner(home, paths, minAge))
 	}
 	if appConfig.Scanners.Go {
-		home := utils.HomeDir()
 		e.Register(scanner.NewGoScanner(home))
 	}
 	if appConfig.Scanners.JetBrains {
-		home := utils.HomeDir()
 		e.Register(scanner.NewJetBrainsScanner(home))
 	}
 	if appConfig.Scanners.Maven {
-		home := utils.HomeDir()
 		e.Register(scanner.NewMavenScanner(home))
 	}
 	if appConfig.Scanners.Gradle {
-		home := utils.HomeDir()
 		e.Register(scanner.NewGradleScanner(home))
 	}
 	if appConfig.Scanners.Ruby {
-		home := utils.HomeDir()
 		e.Register(scanner.NewRubyScanner(home))
 	}
 
 	return e
 }
 
-func selectedCategories(system, browser, xcode, large, docker, node, homebrew, simulator, python, rust, golang, jetbrains, maven, gradle, ruby, dev, caches, all bool) []string {
+// CategoryFilter holds the boolean flags for individual scanners and profiles.
+type CategoryFilter struct {
+	System    bool
+	Browser   bool
+	Xcode     bool
+	Large     bool
+	Docker    bool
+	Node      bool
+	Homebrew  bool
+	Simulator bool
+	Python    bool
+	Rust      bool
+	Go        bool
+	JetBrains bool
+	Maven     bool
+	Gradle    bool
+	Ruby      bool
+	Dev       bool
+	Caches    bool
+	All       bool
+}
+
+func selectedCategories(f CategoryFilter) []string {
 	// --all overrides everything.
-	if all {
+	if f.All {
 		return nil
 	}
 
 	// Expand --dev profile.
-	if dev {
-		node = true
-		python = true
-		rust = true
-		golang = true
-		jetbrains = true
-		maven = true
-		gradle = true
-		ruby = true
+	if f.Dev {
+		f.Node = true
+		f.Python = true
+		f.Rust = true
+		f.Go = true
+		f.JetBrains = true
+		f.Maven = true
+		f.Gradle = true
+		f.Ruby = true
 	}
 
 	// Expand --caches profile.
-	if caches {
-		system = true
-		browser = true
-		homebrew = true
+	if f.Caches {
+		f.System = true
+		f.Browser = true
+		f.Homebrew = true
 	}
 
-	if !system && !browser && !xcode && !large && !docker && !node && !homebrew && !simulator && !python && !rust && !golang && !jetbrains && !maven && !gradle && !ruby {
-		return nil
+	type entry struct {
+		flag bool
+		name string
 	}
+	entries := []entry{
+		{f.System, "System Junk"},
+		{f.Browser, "Browser Cache"},
+		{f.Xcode, "Xcode Junk"},
+		{f.Large, "Large & Old Files"},
+		{f.Docker, "Docker"},
+		{f.Node, "Node.js"},
+		{f.Homebrew, "Homebrew"},
+		{f.Simulator, "iOS Simulators"},
+		{f.Python, "Python"},
+		{f.Rust, "Rust"},
+		{f.Go, "Go"},
+		{f.JetBrains, "JetBrains"},
+		{f.Maven, "Maven"},
+		{f.Gradle, "Gradle"},
+		{f.Ruby, "Ruby"},
+	}
+
 	var cats []string
-	if system {
-		cats = append(cats, "System Junk")
+	for _, e := range entries {
+		if e.flag {
+			cats = append(cats, e.name)
+		}
 	}
-	if browser {
-		cats = append(cats, "Browser Cache")
-	}
-	if xcode {
-		cats = append(cats, "Xcode Junk")
-	}
-	if large {
-		cats = append(cats, "Large & Old Files")
-	}
-	if docker {
-		cats = append(cats, "Docker")
-	}
-	if node {
-		cats = append(cats, "Node.js")
-	}
-	if homebrew {
-		cats = append(cats, "Homebrew")
-	}
-	if simulator {
-		cats = append(cats, "iOS Simulators")
-	}
-	if python {
-		cats = append(cats, "Python")
-	}
-	if rust {
-		cats = append(cats, "Rust")
-	}
-	if golang {
-		cats = append(cats, "Go")
-	}
-	if jetbrains {
-		cats = append(cats, "JetBrains")
-	}
-	if maven {
-		cats = append(cats, "Maven")
-	}
-	if gradle {
-		cats = append(cats, "Gradle")
-	}
-	if ruby {
-		cats = append(cats, "Ruby")
-	}
-	return cats
+	return cats // nil when nothing selected
 }
 
 func scanWithCategories(e *engine.Engine, cats []string) ([]scanner.Target, error) {
