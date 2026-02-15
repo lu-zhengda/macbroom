@@ -11,12 +11,13 @@ import (
 
 // SpaceLensModel is the standalone Space Lens TUI (used by `spacelens -i`).
 type SpaceLensModel struct {
-	path    string
-	nodes   []scanner.SpaceLensNode
-	cursor  int
-	loading bool
-	width   int
-	height  int
+	path         string
+	nodes        []scanner.SpaceLensNode
+	cursor       int
+	scrollOffset int
+	loading      bool
+	width        int
+	height       int
 }
 
 func NewSpaceLensModel(path string) SpaceLensModel {
@@ -54,16 +55,19 @@ func (m SpaceLensModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
+				m.ensureVisible()
 			}
 		case "down", "j":
 			if m.cursor < len(m.nodes)-1 {
 				m.cursor++
+				m.ensureVisible()
 			}
 		case "enter", "right", "l":
 			if m.cursor < len(m.nodes) && m.nodes[m.cursor].IsDir {
 				m.path = m.nodes[m.cursor].Path
 				m.loading = true
 				m.cursor = 0
+				m.scrollOffset = 0
 				return m, m.doAnalyze()
 			}
 		case "left", "backspace", "h":
@@ -71,11 +75,30 @@ func (m SpaceLensModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.path = m.path[:idx]
 				m.loading = true
 				m.cursor = 0
+				m.scrollOffset = 0
 				return m, m.doAnalyze()
 			}
 		}
 	}
 	return m, nil
+}
+
+func (m *SpaceLensModel) ensureVisible() {
+	visible := m.visibleLines()
+	if m.cursor < m.scrollOffset {
+		m.scrollOffset = m.cursor
+	}
+	if m.cursor >= m.scrollOffset+visible {
+		m.scrollOffset = m.cursor - visible + 1
+	}
+}
+
+func (m SpaceLensModel) visibleLines() int {
+	visible := m.height - 7
+	if visible < 4 {
+		visible = 4
+	}
+	return visible
 }
 
 func (m SpaceLensModel) View() string {
@@ -98,27 +121,8 @@ func (m SpaceLensModel) View() string {
 		return s + renderFooter("q quit")
 	}
 
-	// Reserve lines for header (4) and footer (3).
-	tmapHeight := m.height - 7
-	tmapWidth := m.width - 2
-	if tmapHeight < 4 {
-		tmapHeight = 4
-	}
-	if tmapWidth < 20 {
-		tmapWidth = 20
-	}
-
-	s += renderTreemap(m.nodes, tmapWidth, tmapHeight, m.cursor)
-
-	// Show selected item info below the treemap.
-	if m.cursor < len(m.nodes) {
-		node := m.nodes[m.cursor]
-		info := fmt.Sprintf("  %s  %s", node.Name, utils.FormatSize(node.Size))
-		if node.IsDir {
-			info += "  [dir]"
-		}
-		s += selectedStyle.Render(info) + "\n"
-	}
+	visible := m.visibleLines()
+	s += renderBarList(m.nodes, m.width, visible, m.cursor, m.scrollOffset)
 
 	s += renderFooter("arrows navigate | enter/right drill in | left/h go up | q quit")
 	return s

@@ -692,6 +692,19 @@ func (m *Model) ensureCursorVisible() {
 	}
 }
 
+func (m *Model) ensureSlCursorVisible() {
+	visible := m.height - 7
+	if visible < 4 {
+		visible = 4
+	}
+	if m.slCursor < m.slScrollOffset {
+		m.slScrollOffset = m.slCursor
+	}
+	if m.slCursor >= m.slScrollOffset+visible {
+		m.slScrollOffset = m.slCursor - visible + 1
+	}
+}
+
 func (m Model) visibleItemCount() int {
 	// Reserve lines for: title(2) + status bar(1) + help(2) + padding(1) = 6
 	available := m.height - 6
@@ -750,10 +763,12 @@ func (m Model) updateSpaceLens(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up", "k":
 		if m.slCursor > 0 {
 			m.slCursor--
+			m.ensureSlCursorVisible()
 		}
 	case "down", "j":
 		if m.slCursor < len(m.slNodes)-1 {
 			m.slCursor++
+			m.ensureSlCursorVisible()
 		}
 	case "enter", "right", "l":
 		if m.slCursor < len(m.slNodes) && m.slNodes[m.slCursor].IsDir {
@@ -1552,26 +1567,12 @@ func (m Model) viewSpaceLens() string {
 	}
 
 	// Reserve lines for header (4) and footer (3).
-	tmapHeight := m.height - 7
-	tmapWidth := m.width - 2
-	if tmapHeight < 4 {
-		tmapHeight = 4
-	}
-	if tmapWidth < 20 {
-		tmapWidth = 20
+	visible := m.height - 7
+	if visible < 4 {
+		visible = 4
 	}
 
-	s += renderTreemap(m.slNodes, tmapWidth, tmapHeight, m.slCursor)
-
-	// Show selected item info below.
-	if m.slCursor < len(m.slNodes) {
-		node := m.slNodes[m.slCursor]
-		info := fmt.Sprintf("  %s  %s", node.Name, utils.FormatSize(node.Size))
-		if node.IsDir {
-			info += "  [dir]"
-		}
-		s += selectedStyle.Render(info) + "\n"
-	}
+	s += renderBarList(m.slNodes, m.width, visible, m.slCursor, m.slScrollOffset)
 
 	s += renderFooter("arrows navigate | enter drill in | d delete | h go up | esc back | q quit")
 	return s

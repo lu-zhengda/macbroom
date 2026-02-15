@@ -21,7 +21,7 @@ var (
 )
 
 // ---------------------------------------------------------------------------
-// Category colors -- used in the dashboard and treemap views.
+// Category colors -- used in the dashboard view.
 // ---------------------------------------------------------------------------
 
 var categoryColors = map[string]lipgloss.Color{
@@ -76,21 +76,3 @@ func barColor(ratio float64) lipgloss.Color {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Treemap colors -- used for adjacent block coloring in treemap views.
-// ---------------------------------------------------------------------------
-
-var treemapColors = []lipgloss.Color{
-	lipgloss.Color("75"),
-	lipgloss.Color("214"),
-	lipgloss.Color("141"),
-	lipgloss.Color("223"),
-	lipgloss.Color("39"),
-	lipgloss.Color("119"),
-	lipgloss.Color("208"),
-	lipgloss.Color("183"),
-	lipgloss.Color("220"),
-	lipgloss.Color("171"),
-	lipgloss.Color("82"),
-	lipgloss.Color("212"),
-}
