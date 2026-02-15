@@ -225,6 +225,7 @@ func New(e *engine.Engine) Model {
 		slPath:        "/",
 		uiAppSelected: make(map[int]bool),
 		uiSelected:    make(map[int]bool),
+		dupSelected:   make(map[string]bool),
 	}
 }
 
@@ -257,7 +258,10 @@ func (m *Model) startScan() tea.Cmd {
 func (m Model) doScan(ch chan engine.ScanProgress) tea.Cmd {
 	return func() tea.Msg {
 		results := m.engine.ScanGroupedWithProgress(context.Background(), 4, func(p engine.ScanProgress) {
-			ch <- p
+			select {
+			case ch <- p:
+			default:
+			}
 		})
 		close(ch)
 		return scanDoneMsg{results: results}
@@ -765,16 +769,6 @@ func (m Model) updateSpaceLens(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor = 1
 	}
 	return m, nil
-}
-
-func (m *Model) slEnsureCursorVisible() {
-	visible := m.visibleItemCount()
-	if m.slCursor < m.slScrollOffset {
-		m.slScrollOffset = m.slCursor
-	}
-	if m.slCursor >= m.slScrollOffset+visible {
-		m.slScrollOffset = m.slCursor - visible + 1
-	}
 }
 
 func (m Model) updateSpaceLensConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

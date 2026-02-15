@@ -17,8 +17,8 @@ type mockScanner struct {
 }
 
 func (m *mockScanner) Name() string            { return m.name }
-func (m *mockScanner) Description() string      { return "mock scanner" }
-func (m *mockScanner) Risk() scanner.RiskLevel   { return scanner.Safe }
+func (m *mockScanner) Description() string     { return "mock scanner" }
+func (m *mockScanner) Risk() scanner.RiskLevel { return scanner.Safe }
 func (m *mockScanner) Scan(ctx context.Context) ([]scanner.Target, error) {
 	if m.delay > 0 {
 		select {

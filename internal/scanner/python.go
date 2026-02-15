@@ -115,18 +115,20 @@ func (s *PythonScanner) Scan(ctx context.Context) ([]Target, error) {
 			}
 
 			age := now.Sub(info.ModTime())
-			if age >= s.maxAge {
-				size, _ := utils.DirSize(path)
-				targets = append(targets, Target{
-					Path:        path,
-					Size:        size,
-					Category:    "Python",
-					Description: fmt.Sprintf("stale virtualenv (unused for %d days)", int(age.Hours()/24)),
-					Risk:        Moderate,
-					ModTime:     info.ModTime(),
-					IsDir:       true,
-				})
+			if s.maxAge > 0 && age < s.maxAge {
+				return fs.SkipDir
 			}
+
+			size, _ := utils.DirSize(path)
+			targets = append(targets, Target{
+				Path:        path,
+				Size:        size,
+				Category:    "Python",
+				Description: fmt.Sprintf("stale virtualenv (unused for %d days)", int(age.Hours()/24)),
+				Risk:        Moderate,
+				ModTime:     info.ModTime(),
+				IsDir:       true,
+			})
 
 			// Don't descend into virtualenv directories regardless of staleness.
 			return fs.SkipDir
