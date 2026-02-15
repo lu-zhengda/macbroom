@@ -22,6 +22,7 @@ type viewState int
 
 const (
 	viewMenu viewState = iota
+	viewScanning
 	viewDashboard
 	viewCategory
 	viewConfirm
@@ -40,6 +41,17 @@ const (
 
 type scanDoneMsg struct {
 	results []engine.ScanResult
+}
+
+type scanProgressMsg struct {
+	progress engine.ScanProgress
+}
+
+type scannerStatus struct {
+	name   string
+	status engine.ScanStatus
+	count  int
+	size   int64
 }
 
 type cleanDoneMsg struct {
@@ -107,6 +119,10 @@ type Model struct {
 	cursor      int
 	selected    map[int]bool
 
+	// Scanning progress state
+	scanStatuses   []scannerStatus
+	scanProgressCh chan engine.ScanProgress
+
 	categoryIdx    int
 	categoryCursor int
 	scrollOffset   int
@@ -144,18 +160,18 @@ type Model struct {
 	dupFreed        int64
 
 	// Uninstall state
-	uiApps           []string       // installed app names
-	uiAppSelected   map[int]bool   // multi-select for apps
-	uiAppCursor     int
+	uiApps            []string     // installed app names
+	uiAppSelected     map[int]bool // multi-select for apps
+	uiAppCursor       int
 	uiAppScrollOffset int
-	uiTargets        []scanner.Target
-	uiLoading        bool
-	uiCursor         int
-	uiScrollOffset2  int            // scroll offset for results view
-	uiSelected       map[int]bool   // selected files to delete
-	uiDeleted        int
-	uiFailed         int
-	uiFreed          int64
+	uiTargets         []scanner.Target
+	uiLoading         bool
+	uiCursor          int
+	uiScrollOffset2   int          // scroll offset for results view
+	uiSelected        map[int]bool // selected files to delete
+	uiDeleted         int
+	uiFailed          int
+	uiFreed           int64
 
 	spinner spinner.Model
 
@@ -169,12 +185,12 @@ func New(e *engine.Engine) Model {
 	sp.Style = lipgloss.NewStyle().Foreground(colorPrimary)
 
 	return Model{
-		engine:         e,
-		selected:       make(map[int]bool),
-		spinner:        sp,
-		slPath:         "/",
-		uiAppSelected:  make(map[int]bool),
-		uiSelected:     make(map[int]bool),
+		engine:        e,
+		selected:      make(map[int]bool),
+		spinner:       sp,
+		slPath:        "/",
+		uiAppSelected: make(map[int]bool),
+		uiSelected:    make(map[int]bool),
 	}
 }
 
@@ -182,10 +198,33 @@ func (m Model) Init() tea.Cmd {
 	return m.spinner.Tick
 }
 
-func (m Model) doScan() tea.Cmd {
+func (m *Model) startScan() tea.Cmd {
+	ch := make(chan engine.ScanProgress, 20)
+	m.scanProgressCh = ch
+
+	return tea.Batch(
+		m.doScan(ch),
+		waitForScanProgress(ch),
+	)
+}
+
+func (m Model) doScan(ch chan engine.ScanProgress) tea.Cmd {
 	return func() tea.Msg {
-		results := m.engine.ScanGrouped(context.Background())
+		results := m.engine.ScanGroupedWithProgress(context.Background(), 4, func(p engine.ScanProgress) {
+			ch <- p
+		})
+		close(ch)
 		return scanDoneMsg{results: results}
+	}
+}
+
+func waitForScanProgress(ch chan engine.ScanProgress) tea.Cmd {
+	return func() tea.Msg {
+		p, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return scanProgressMsg{progress: p}
 	}
 }
 
@@ -234,15 +273,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if m.scanning || m.slLoading || m.dupLoading || m.uiLoading || m.currentView == viewMaintain {
+		if m.scanning || m.currentView == viewScanning || m.slLoading || m.dupLoading || m.uiLoading || m.currentView == viewMaintain {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
 		}
 		return m, nil
 
+	case scanProgressMsg:
+		for i, ss := range m.scanStatuses {
+			if ss.name == msg.progress.Name {
+				m.scanStatuses[i].status = msg.progress.Status
+				if msg.progress.Status == engine.ScanDone {
+					m.scanStatuses[i].count = len(msg.progress.Targets)
+					var size int64
+					for _, t := range msg.progress.Targets {
+						size += t.Size
+					}
+					m.scanStatuses[i].size = size
+				}
+				break
+			}
+		}
+		return m, waitForScanProgress(m.scanProgressCh)
+
 	case scanDoneMsg:
 		m.scanning = false
+		m.scanProgressCh = nil
 		m.results = msg.results
 		m.currentView = viewDashboard
 		return m, nil
@@ -352,6 +409,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.currentView {
 		case viewMenu:
 			return m.updateMenu(msg)
+		case viewScanning:
+			return m.updateScanning(msg)
 		case viewDashboard:
 			return m.updateDashboard(msg)
 		case viewCategory:
@@ -399,9 +458,15 @@ func (m Model) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		switch m.cursor {
 		case 0: // Clean
-			m.scanning = true
-			m.currentView = viewDashboard
-			return m, tea.Batch(m.doScan(), m.spinner.Tick)
+			m.scanStatuses = nil
+			for _, s := range m.engine.Scanners() {
+				m.scanStatuses = append(m.scanStatuses, scannerStatus{
+					name:   s.Name(),
+					status: engine.ScanWaiting,
+				})
+			}
+			m.currentView = viewScanning
+			return m, tea.Batch(m.spinner.Tick, m.startScan())
 		case 1: // Space Lens
 			m.slLoading = true
 			m.slCursor = 0
@@ -541,10 +606,16 @@ func (m Model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) updateResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "r":
-		m.scanning = true
-		m.currentView = viewDashboard
+		m.scanStatuses = nil
+		for _, s := range m.engine.Scanners() {
+			m.scanStatuses = append(m.scanStatuses, scannerStatus{
+				name:   s.Name(),
+				status: engine.ScanWaiting,
+			})
+		}
 		m.cursor = 0
-		return m, tea.Batch(m.doScan(), m.spinner.Tick)
+		m.currentView = viewScanning
+		return m, tea.Batch(m.spinner.Tick, m.startScan())
 	case "esc", "backspace":
 		m.currentView = viewMenu
 		m.cursor = 0
@@ -1020,13 +1091,11 @@ func (m Model) doClean() tea.Cmd {
 // --- Views ---
 
 func (m Model) View() string {
-	if m.scanning {
-		return renderHeader("Clean") + "\n" + m.spinner.View() + " Scanning your Mac...\n"
-	}
-
 	switch m.currentView {
 	case viewMenu:
 		return m.viewMenu()
+	case viewScanning:
+		return m.viewScanProgress()
 	case viewDashboard:
 		return m.viewDashboard()
 	case viewCategory:
@@ -1072,6 +1141,41 @@ func (m Model) viewMenu() string {
 	}
 
 	s += renderFooter("j/k navigate | enter select | q quit")
+	return s
+}
+
+func (m Model) updateScanning(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "esc" || msg.String() == "backspace" {
+		m.scanning = false
+		m.scanStatuses = nil
+		m.scanProgressCh = nil
+		m.currentView = viewMenu
+		m.cursor = 0
+	}
+	return m, nil
+}
+
+func (m Model) viewScanProgress() string {
+	s := renderHeader("Clean")
+
+	for _, ss := range m.scanStatuses {
+		var icon, detail string
+		switch ss.status {
+		case engine.ScanWaiting:
+			icon = dimStyle.Render("○")
+			detail = dimStyle.Render("waiting...")
+		case engine.ScanStarted:
+			icon = m.spinner.View()
+			detail = "scanning..."
+		case engine.ScanDone:
+			icon = successStyle.Render("✓")
+			detail = fmt.Sprintf("%d items   %s", ss.count, utils.FormatSize(ss.size))
+		}
+		line := fmt.Sprintf("  %s %-20s %s", icon, ss.name, detail)
+		s += line + "\n"
+	}
+
+	s += renderFooter("esc cancel | q quit")
 	return s
 }
 
