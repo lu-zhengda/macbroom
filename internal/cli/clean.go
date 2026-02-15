@@ -16,24 +16,7 @@ var (
 	cleanYes       bool
 	cleanDryRun    bool
 	cleanQuiet     bool
-	cleanSystem    bool
-	cleanBrowser   bool
-	cleanXcode     bool
-	cleanLarge     bool
-	cleanDocker    bool
-	cleanNode      bool
-	cleanHomebrew  bool
-	cleanSimulator bool
-	cleanPython    bool
-	cleanRust      bool
-	cleanGo        bool
-	cleanJetBrains bool
-	cleanMaven     bool
-	cleanGradle    bool
-	cleanRuby      bool
-	cleanDev       bool
-	cleanCaches    bool
-	cleanAll       bool
+	cleanFilter    CategoryFilter
 )
 
 // cleanPrint prints to stdout only when --quiet is not set.
@@ -55,7 +38,7 @@ var cleanCmd = &cobra.Command{
 	Short: "Clean selected junk files",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		e := buildEngine()
-		cats := selectedCategories(cleanSystem, cleanBrowser, cleanXcode, cleanLarge, cleanDocker, cleanNode, cleanHomebrew, cleanSimulator, cleanPython, cleanRust, cleanGo, cleanJetBrains, cleanMaven, cleanGradle, cleanRuby, cleanDev, cleanCaches, cleanAll)
+		cats := selectedCategories(cleanFilter)
 
 		cleanPrintln("Scanning...")
 		targets, err := scanWithCategories(e, cats)
@@ -172,22 +155,23 @@ func init() {
 	cleanCmd.Flags().BoolVarP(&cleanYes, "yes", "y", false, "Skip confirmation prompt")
 	cleanCmd.Flags().BoolVar(&cleanDryRun, "dry-run", false, "Show what would be deleted without actually deleting")
 	cleanCmd.Flags().BoolVarP(&cleanQuiet, "quiet", "q", false, "Suppress all output (for scheduled runs)")
-	cleanCmd.Flags().BoolVar(&cleanSystem, "system", false, "Clean system junk only")
-	cleanCmd.Flags().BoolVar(&cleanBrowser, "browser", false, "Clean browser caches only")
-	cleanCmd.Flags().BoolVar(&cleanXcode, "xcode", false, "Clean Xcode junk only")
-	cleanCmd.Flags().BoolVar(&cleanLarge, "large", false, "Clean large/old files only")
-	cleanCmd.Flags().BoolVar(&cleanDocker, "docker", false, "Clean Docker junk only")
-	cleanCmd.Flags().BoolVar(&cleanNode, "node", false, "Clean Node.js cache only")
-	cleanCmd.Flags().BoolVar(&cleanHomebrew, "homebrew", false, "Clean Homebrew cache only")
-	cleanCmd.Flags().BoolVar(&cleanSimulator, "simulator", false, "Clean iOS Simulator data only")
-	cleanCmd.Flags().BoolVar(&cleanPython, "python", false, "Clean Python cache only")
-	cleanCmd.Flags().BoolVar(&cleanRust, "rust", false, "Clean Rust cache only")
-	cleanCmd.Flags().BoolVar(&cleanGo, "go", false, "Clean Go cache only")
-	cleanCmd.Flags().BoolVar(&cleanJetBrains, "jetbrains", false, "Clean JetBrains cache only")
-	cleanCmd.Flags().BoolVar(&cleanMaven, "maven", false, "Clean Maven cache only")
-	cleanCmd.Flags().BoolVar(&cleanGradle, "gradle", false, "Clean Gradle cache only")
-	cleanCmd.Flags().BoolVar(&cleanRuby, "ruby", false, "Clean Ruby cache only")
-	cleanCmd.Flags().BoolVar(&cleanDev, "dev", false, "Clean all dev-tool caches")
-	cleanCmd.Flags().BoolVar(&cleanCaches, "caches", false, "Clean all general caches")
-	cleanCmd.Flags().BoolVar(&cleanAll, "all", false, "Clean everything")
+	f := cleanCmd.Flags()
+	f.BoolVar(&cleanFilter.System, "system", false, "Clean system junk only")
+	f.BoolVar(&cleanFilter.Browser, "browser", false, "Clean browser caches only")
+	f.BoolVar(&cleanFilter.Xcode, "xcode", false, "Clean Xcode junk only")
+	f.BoolVar(&cleanFilter.Large, "large", false, "Clean large/old files only")
+	f.BoolVar(&cleanFilter.Docker, "docker", false, "Clean Docker junk only")
+	f.BoolVar(&cleanFilter.Node, "node", false, "Clean Node.js cache only")
+	f.BoolVar(&cleanFilter.Homebrew, "homebrew", false, "Clean Homebrew cache only")
+	f.BoolVar(&cleanFilter.Simulator, "simulator", false, "Clean iOS Simulator data only")
+	f.BoolVar(&cleanFilter.Python, "python", false, "Clean Python cache only")
+	f.BoolVar(&cleanFilter.Rust, "rust", false, "Clean Rust cache only")
+	f.BoolVar(&cleanFilter.Go, "go", false, "Clean Go cache only")
+	f.BoolVar(&cleanFilter.JetBrains, "jetbrains", false, "Clean JetBrains cache only")
+	f.BoolVar(&cleanFilter.Maven, "maven", false, "Clean Maven cache only")
+	f.BoolVar(&cleanFilter.Gradle, "gradle", false, "Clean Gradle cache only")
+	f.BoolVar(&cleanFilter.Ruby, "ruby", false, "Clean Ruby cache only")
+	f.BoolVar(&cleanFilter.Dev, "dev", false, "Clean all dev-tool caches")
+	f.BoolVar(&cleanFilter.Caches, "caches", false, "Clean all general caches")
+	f.BoolVar(&cleanFilter.All, "all", false, "Clean everything")
 }
