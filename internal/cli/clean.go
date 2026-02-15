@@ -25,6 +25,7 @@ var (
 	cleanHomebrew  bool
 	cleanSimulator bool
 	cleanPython    bool
+	cleanRust      bool
 )
 
 // cleanPrint prints to stdout only when --quiet is not set.
@@ -46,7 +47,7 @@ var cleanCmd = &cobra.Command{
 	Short: "Clean selected junk files",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		e := buildEngine()
-		cats := selectedCategories(cleanSystem, cleanBrowser, cleanXcode, cleanLarge, cleanDocker, cleanNode, cleanHomebrew, cleanSimulator, cleanPython)
+		cats := selectedCategories(cleanSystem, cleanBrowser, cleanXcode, cleanLarge, cleanDocker, cleanNode, cleanHomebrew, cleanSimulator, cleanPython, cleanRust)
 
 		cleanPrintln("Scanning...")
 		targets, err := scanWithCategories(e, cats)
@@ -172,4 +173,5 @@ func init() {
 	cleanCmd.Flags().BoolVar(&cleanHomebrew, "homebrew", false, "Clean Homebrew cache only")
 	cleanCmd.Flags().BoolVar(&cleanSimulator, "simulator", false, "Clean iOS Simulator data only")
 	cleanCmd.Flags().BoolVar(&cleanPython, "python", false, "Clean Python cache only")
+	cleanCmd.Flags().BoolVar(&cleanRust, "rust", false, "Clean Rust cache only")
 }

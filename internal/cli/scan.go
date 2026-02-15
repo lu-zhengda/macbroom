@@ -16,6 +16,7 @@ var (
 	scanHomebrew  bool
 	scanSimulator bool
 	scanPython    bool
+	scanRust      bool
 )
 
 var scanCmd = &cobra.Command{
@@ -23,7 +24,7 @@ var scanCmd = &cobra.Command{
 	Short: "Scan for junk files and reclaimable space",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		e := buildEngine()
-		cats := selectedCategories(scanSystem, scanBrowser, scanXcode, scanLarge, scanDocker, scanNode, scanHomebrew, scanSimulator, scanPython)
+		cats := selectedCategories(scanSystem, scanBrowser, scanXcode, scanLarge, scanDocker, scanNode, scanHomebrew, scanSimulator, scanPython, scanRust)
 
 		fmt.Println("Scanning...")
 		targets, err := scanWithCategories(e, cats)
@@ -46,4 +47,5 @@ func init() {
 	scanCmd.Flags().BoolVar(&scanHomebrew, "homebrew", false, "Scan Homebrew cache only")
 	scanCmd.Flags().BoolVar(&scanSimulator, "simulator", false, "Scan iOS Simulator data only")
 	scanCmd.Flags().BoolVar(&scanPython, "python", false, "Scan Python cache only")
+	scanCmd.Flags().BoolVar(&scanRust, "rust", false, "Scan Rust cache only")
 }

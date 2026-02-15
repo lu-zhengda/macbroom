@@ -8,12 +8,12 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/spf13/cobra"
 	"github.com/lu-zhengda/macbroom/internal/config"
 	"github.com/lu-zhengda/macbroom/internal/engine"
 	"github.com/lu-zhengda/macbroom/internal/scanner"
 	"github.com/lu-zhengda/macbroom/internal/tui"
 	"github.com/lu-zhengda/macbroom/internal/utils"
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -142,12 +142,18 @@ func buildEngine() *engine.Engine {
 		minAge := config.ParseDuration(appConfig.LargeFiles.MinAge)
 		e.Register(scanner.NewPythonScanner(home, paths, minAge))
 	}
+	if appConfig.Scanners.Rust {
+		home := utils.HomeDir()
+		paths := expandPaths(appConfig.LargeFiles.Paths)
+		minAge := config.ParseDuration(appConfig.LargeFiles.MinAge)
+		e.Register(scanner.NewRustScanner(home, paths, minAge))
+	}
 
 	return e
 }
 
-func selectedCategories(system, browser, xcode, large, docker, node, homebrew, simulator, python bool) []string {
-	if !system && !browser && !xcode && !large && !docker && !node && !homebrew && !simulator && !python {
+func selectedCategories(system, browser, xcode, large, docker, node, homebrew, simulator, python, rust bool) []string {
+	if !system && !browser && !xcode && !large && !docker && !node && !homebrew && !simulator && !python && !rust {
 		return nil
 	}
 	var cats []string
@@ -177,6 +183,9 @@ func selectedCategories(system, browser, xcode, large, docker, node, homebrew, s
 	}
 	if python {
 		cats = append(cats, "Python")
+	}
+	if rust {
+		cats = append(cats, "Rust")
 	}
 	return cats
 }

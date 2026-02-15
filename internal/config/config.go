@@ -39,6 +39,7 @@ type ScannersConfig struct {
 	Homebrew      bool `yaml:"homebrew"`
 	IOSSimulators bool `yaml:"ios_simulators"`
 	Python        bool `yaml:"python"`
+	Rust          bool `yaml:"rust"`
 }
 
 // SpaceLensConfig controls the space-lens disk visualizer.
@@ -75,6 +76,7 @@ func Default() *Config {
 			Homebrew:      true,
 			IOSSimulators: true,
 			Python:        true,
+			Rust:          true,
 		},
 		SpaceLens: SpaceLensConfig{
 			DefaultPath: "/",

@@ -30,9 +30,11 @@ func NewPythonScanner(home string, searchPaths []string, maxAge time.Duration) *
 	}
 }
 
-func (s *PythonScanner) Name() string        { return "Python" }
-func (s *PythonScanner) Description() string { return "pip cache, conda packages, and stale virtualenvs" }
-func (s *PythonScanner) Risk() RiskLevel     { return Safe }
+func (s *PythonScanner) Name() string { return "Python" }
+func (s *PythonScanner) Description() string {
+	return "pip cache, conda packages, and stale virtualenvs"
+}
+func (s *PythonScanner) Risk() RiskLevel { return Safe }
 
 func (s *PythonScanner) Scan(ctx context.Context) ([]Target, error) {
 	if ctx.Err() != nil {
