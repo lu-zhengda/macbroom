@@ -92,6 +92,14 @@ type cleanProgressMsg struct {
 	total int
 }
 
+type animTickMsg struct{}
+
+func animTick() tea.Cmd {
+	return tea.Tick(30*time.Millisecond, func(t time.Time) tea.Msg {
+		return animTickMsg{}
+	})
+}
+
 type dupesCleanProgressMsg struct {
 	done  int
 	total int
@@ -194,6 +202,11 @@ type Model struct {
 	uiFailed          int
 	uiFreed           int64
 
+	// Animation state
+	animStart    time.Time
+	animDuration time.Duration
+	animating    bool
+
 	spinner spinner.Model
 
 	width  int
@@ -217,6 +230,18 @@ func New(e *engine.Engine) Model {
 
 func (m Model) Init() tea.Cmd {
 	return m.spinner.Tick
+}
+
+func (m Model) animatedSize(target int64) int64 {
+	if !m.animating {
+		return target
+	}
+	elapsed := time.Since(m.animStart)
+	if elapsed >= m.animDuration {
+		return target
+	}
+	ratio := float64(elapsed) / float64(m.animDuration)
+	return int64(ratio * float64(target))
 }
 
 func (m *Model) startScan() tea.Cmd {
@@ -323,7 +348,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.scanProgressCh = nil
 		m.results = msg.results
 		m.currentView = viewDashboard
-		return m, nil
+		m.animStart = time.Now()
+		m.animDuration = 500 * time.Millisecond
+		m.animating = true
+		return m, animTick()
 
 	case cleanProgressMsg:
 		m.cleanDone = msg.done
@@ -340,6 +368,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastFailed = msg.failed
 		m.lastSize = msg.size
 		m.currentView = viewResult
+		m.animStart = time.Now()
+		m.animDuration = 500 * time.Millisecond
+		m.animating = true
 
 		// Record cleanup history.
 		if msg.cleaned > 0 && m.categoryIdx < len(m.results) {
@@ -353,7 +384,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		}
 
-		return m, nil
+		return m, animTick()
 
 	case spaceLensProgressMsg:
 		m.slScanning = msg.name
@@ -440,6 +471,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastFailed = msg.failed
 		m.lastSize = msg.freed
 		m.currentView = viewResult
+		return m, nil
+
+	case animTickMsg:
+		if m.animating {
+			if time.Since(m.animStart) >= m.animDuration {
+				m.animating = false
+				return m, nil
+			}
+			return m, animTick()
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -1313,7 +1354,7 @@ func (m Model) viewDashboard() string {
 		}
 	}
 
-	s += "\n" + statusBarStyle.Render(fmt.Sprintf(" Total reclaimable: %s ", utils.FormatSize(totalSize)))
+	s += "\n" + statusBarStyle.Render(fmt.Sprintf(" Total reclaimable: %s ", utils.FormatSize(m.animatedSize(totalSize))))
 	s += renderFooter("j/k navigate | enter view details | esc back | q quit")
 	return s
 }
@@ -1431,7 +1472,8 @@ func (m Model) viewConfirm() string {
 func (m Model) viewResult() string {
 	s := renderHeader("Cleanup Complete")
 
-	s += successStyle.Render(fmt.Sprintf("  Cleaned: %d items (%s freed)", m.lastCleaned, utils.FormatSize(m.lastSize))) + "\n"
+	freed := m.animatedSize(m.lastSize)
+	s += successStyle.Render(fmt.Sprintf("  Cleaned: %d items (%s freed)", m.lastCleaned, utils.FormatSize(freed))) + "\n"
 	if m.lastFailed > 0 {
 		s += failStyle.Render(fmt.Sprintf("  Failed:  %d items", m.lastFailed)) + "\n"
 	}
