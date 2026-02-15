@@ -41,6 +41,7 @@ type ScannersConfig struct {
 	Python        bool `yaml:"python"`
 	Rust          bool `yaml:"rust"`
 	Go            bool `yaml:"go"`
+	JetBrains     bool `yaml:"jetbrains"`
 }
 
 // SpaceLensConfig controls the space-lens disk visualizer.
@@ -79,6 +80,7 @@ func Default() *Config {
 			Python:        true,
 			Rust:          true,
 			Go:            true,
+			JetBrains:     true,
 		},
 		SpaceLens: SpaceLensConfig{
 			DefaultPath: "/",

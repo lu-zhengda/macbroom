@@ -152,12 +152,16 @@ func buildEngine() *engine.Engine {
 		home := utils.HomeDir()
 		e.Register(scanner.NewGoScanner(home))
 	}
+	if appConfig.Scanners.JetBrains {
+		home := utils.HomeDir()
+		e.Register(scanner.NewJetBrainsScanner(home))
+	}
 
 	return e
 }
 
-func selectedCategories(system, browser, xcode, large, docker, node, homebrew, simulator, python, rust, golang bool) []string {
-	if !system && !browser && !xcode && !large && !docker && !node && !homebrew && !simulator && !python && !rust && !golang {
+func selectedCategories(system, browser, xcode, large, docker, node, homebrew, simulator, python, rust, golang, jetbrains bool) []string {
+	if !system && !browser && !xcode && !large && !docker && !node && !homebrew && !simulator && !python && !rust && !golang && !jetbrains {
 		return nil
 	}
 	var cats []string
@@ -193,6 +197,9 @@ func selectedCategories(system, browser, xcode, large, docker, node, homebrew, s
 	}
 	if golang {
 		cats = append(cats, "Go")
+	}
+	if jetbrains {
+		cats = append(cats, "JetBrains")
 	}
 	return cats
 }
